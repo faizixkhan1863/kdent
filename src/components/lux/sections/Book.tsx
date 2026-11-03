@@ -1,22 +1,16 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Loader2,
   MapPin,
   MessageCircle,
   Phone,
 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import Eyebrow from "../ui/Eyebrow";
 import Reveal from "../ui/Reveal";
 import SplitReveal from "../ui/SplitReveal";
@@ -44,7 +38,11 @@ type BookingResult = {
 };
 
 export default function Book() {
-  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
+  // Computed post-mount so SSR and client always agree (timezone-safe).
+  const [today, setToday] = useState("");
+  useEffect(() => {
+    setToday(new Date().toISOString().split("T")[0]);
+  }, []);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [service, setService] = useState("");
@@ -232,25 +230,27 @@ export default function Book() {
                       />
                     </div>
 
-                    <Select value={service} onValueChange={setService}>
-                      <SelectTrigger
-                        className="lux-input !h-auto w-full !justify-between !rounded-[14px] !border-[rgba(156,230,218,0.16)] !bg-[rgba(156,230,218,0.05)] !py-[0.95rem] text-[15px] !text-[#eafaf6] data-[placeholder]:!text-[rgba(222,242,238,0.35)]"
+                    <div className="relative">
+                      <select
+                        className="lux-input w-full cursor-pointer appearance-none pr-10"
+                        value={service}
+                        onChange={(e) => setService(e.target.value)}
                         aria-label="Select treatment"
                       >
-                        <SelectValue placeholder="Which treatment do you need?" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72 border-white/10 bg-[#0b3a3e] text-[#eafaf6]">
+                        <option value="" disabled className="bg-[#0b3a3e]">
+                          Which treatment do you need?
+                        </option>
                         {SERVICES.map((s) => (
-                          <SelectItem
-                            key={s}
-                            value={s}
-                            className="focus:bg-white/10 focus:text-white data-[highlighted]:bg-white/10"
-                          >
+                          <option key={s} value={s} className="bg-[#0b3a3e] text-[#eafaf6]">
                             {s}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[rgba(222,242,238,0.5)]"
+                        aria-hidden="true"
+                      />
+                    </div>
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       <input
