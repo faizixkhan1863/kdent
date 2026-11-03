@@ -1,20 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { Cormorant_Garamond, Instrument_Sans } from "next/font/google";
+import { Fraunces, Manrope } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const display = Cormorant_Garamond({
+const display = Fraunces({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
   style: ["normal", "italic"],
   display: "swap",
 });
 
-const body = Instrument_Sans({
+const body = Manrope({
   variable: "--font-body",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
   display: "swap",
 });
 
@@ -28,7 +27,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "K Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
   description:
-    "A private dental & aesthetic atelier in Bani Gala, Islamabad. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0332 5855589.",
+    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0332 5855589.",
   keywords: [
     "K Dent",
     "dentist Bani Gala",
@@ -45,7 +44,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "K Dent Dental & Aesthetic Care",
     description:
-      "A private dental & aesthetic atelier — smile design, RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
+      "A boutique dental & aesthetic studio — smile design, painless RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
     type: "website",
     locale: "en_PK",
     images: [
@@ -66,7 +65,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0A0908",
+  themeColor: "#041c20",
   width: "device-width",
   initialScale: 1,
 };
