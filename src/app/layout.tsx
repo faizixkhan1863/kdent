@@ -13,7 +13,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Works out-of-the-box on Vercel (VERCEL_URL) and for custom domains
+// via NEXT_PUBLIC_SITE_URL — no manual config required.
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "K Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
   description:
     "Where modern dentistry meets trusted care. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D) at Farhan Heights, Bani Gala, Islamabad. Rated 5.0★. Mon–Sat 10 AM–7 PM. Book on WhatsApp: 0332 5855589.",
@@ -35,11 +42,20 @@ export const metadata: Metadata = {
       "Immersive clinic experience — smile design, RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
     type: "website",
     locale: "en_PK",
+    images: [
+      {
+        url: "/kdent/clinic-suite.jpg",
+        width: 1344,
+        height: 768,
+        alt: "K Dent Dental & Aesthetic Care — modern treatment suite",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "K Dent Dental & Aesthetic Care",
     description: "Modern dentistry. Confident smiles. Bani Gala, Islamabad.",
+    images: ["/kdent/clinic-suite.jpg"],
   },
 };
 
