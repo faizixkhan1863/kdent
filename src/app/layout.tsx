@@ -1,16 +1,21 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Cormorant_Garamond, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const display = Cormorant_Garamond({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const body = Instrument_Sans({
+  variable: "--font-body",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 // Works out-of-the-box on Vercel (VERCEL_URL) and for custom domains
@@ -23,7 +28,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "K Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
   description:
-    "Where modern dentistry meets trusted care. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D) at Farhan Heights, Bani Gala, Islamabad. Rated 5.0★. Mon–Sat 10 AM–7 PM. Book on WhatsApp: 0332 5855589.",
+    "A private dental & aesthetic atelier in Bani Gala, Islamabad. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0332 5855589.",
   keywords: [
     "K Dent",
     "dentist Bani Gala",
@@ -34,12 +39,13 @@ export const metadata: Metadata = {
     "root canal Bani Gala",
     "Dr Yasir Arafat dentist",
     "aesthetic dentistry Islamabad",
+    "luxury dental clinic Islamabad",
   ],
   authors: [{ name: "K Dent Dental & Aesthetic Care" }],
   openGraph: {
     title: "K Dent Dental & Aesthetic Care",
     description:
-      "Immersive clinic experience — smile design, RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
+      "A private dental & aesthetic atelier — smile design, RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
     type: "website",
     locale: "en_PK",
     images: [
@@ -47,20 +53,20 @@ export const metadata: Metadata = {
         url: "/kdent/clinic-suite.jpg",
         width: 1344,
         height: 768,
-        alt: "K Dent Dental & Aesthetic Care — modern treatment suite",
+        alt: "K Dent Dental & Aesthetic Care — the treatment suite",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
     title: "K Dent Dental & Aesthetic Care",
-    description: "Modern dentistry. Confident smiles. Bani Gala, Islamabad.",
+    description: "Where modern dentistry meets trusted care. Bani Gala, Islamabad.",
     images: ["/kdent/clinic-suite.jpg"],
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0F172A",
+  themeColor: "#0A0908",
   width: "device-width",
   initialScale: 1,
 };
@@ -73,7 +79,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+        className={`${display.variable} ${body.variable} antialiased bg-background text-foreground`}
       >
         {children}
         <Toaster />

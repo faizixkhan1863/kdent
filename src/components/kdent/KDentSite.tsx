@@ -1,177 +1,104 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
-import dynamic from 'next/dynamic';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Lenis from 'lenis';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import {
-  buildBgStops,
-  clamp01,
-  initKListeners,
-  lerp,
-  measurePhases,
-  phases,
-  pointer,
-  sampleStops,
-  scrollState,
-} from './lib/state';
-import { useWebGLSupport, useReducedMotion } from '@/hooks/use-webgl';
+import { useReducedMotion, useWebGLSupport } from '@/hooks/use-webgl';
+import Preloader from './Preloader';
+import Cursor from './Cursor';
 import Nav from './sections/Nav';
-import HeroSection from './sections/HeroSection';
-import DetoxSection from './sections/DetoxSection';
-import TourSection from './sections/TourSection';
-import ServicesSection from './sections/ServicesSection';
-import TransformationsSection from './sections/TransformationsSection';
-import TeamSection from './sections/TeamSection';
-import BookingSection from './sections/BookingSection';
+import Hero from './sections/Hero';
+import Ritual from './sections/Ritual';
+import Atelier from './sections/Atelier';
+import Treatments from './sections/Treatments';
+import Transformations from './sections/Transformations';
+import Doctor from './sections/Doctor';
+import Reserve from './sections/Reserve';
 import Footer from './sections/Footer';
-import MagneticBookingButton from './ui/MagneticBookingButton';
-import Fallback2D from './Fallback2D';
-
-const Experience = dynamic(() => import('./Experience'), { ssr: false });
 
 export default function KDentSite() {
-  const webglOk = useWebGLSupport();
+  const webgl = useWebGLSupport();
   const reduced = useReducedMotion();
-  const bgRef = useRef<HTMLDivElement>(null);
-  const use3D = webglOk && !reduced;
 
-  /* ---------- global listeners + 60fps choreography loop ---------- */
-  useEffect(() => {
-    const cleanup = initKListeners();
-    measurePhases();
+  const lenisRef = useRef<Lenis | null>(null);
+  const [ready, setReady] = useState(false);
 
-    // debug handle for live inspection
-    (window as unknown as Record<string, unknown>).__kd = {
-      get p() {
-        return scrollState.current;
-      },
-      get target() {
-        return scrollState.target;
-      },
-      phases,
-    };
-
-    // re-measure once fonts/images settle
-    const t1 = setTimeout(measurePhases, 800);
-    const t2 = setTimeout(measurePhases, 2500);
-    const onResize = () => {
-      measurePhases();
-      ScrollTrigger.refresh();
-    };
-    window.addEventListener('resize', onResize);
-
-    let raf = 0;
-    let lastY = scrollState.target;
-    const velEls = () => Array.from(document.querySelectorAll<HTMLElement>('.vel-type'));
-    let cachedEls: HTMLElement[] = [];
-    const refreshEls = () => {
-      cachedEls = velEls();
-    };
-    refreshEls();
-    const elInterval = setInterval(refreshEls, 3000);
-
-    const stops = buildBgStops();
-
-    const loop = () => {
-      // smooth scroll progress + velocity
-      scrollState.target = clamp01(
-        window.scrollY /
-          Math.max(1, document.documentElement.scrollHeight - window.innerHeight)
-      );
-      const prev = scrollState.current;
-      scrollState.current = lerp(scrollState.current, scrollState.target, 0.085);
-      const dv = Math.abs(scrollState.target - lastY);
-      lastY = scrollState.target;
-      scrollState.velocity = lerp(scrollState.velocity, Math.min(1, dv * 30), 0.12);
-
-      // pointer speed (drives fluid typography)
-      pointer.speed = lerp(pointer.speed, Math.min(1, Math.abs(pointer.nx) + Math.abs(pointer.ny) > 0.02 ? 0.35 + scrollState.velocity * 0.4 : 0.1), 0.08);
-
-      // background color choreography
-      if (bgRef.current) {
-        const [r, g, b] = sampleStops(stops, scrollState.current);
-        bgRef.current.style.backgroundColor = `rgb(${r},${g},${b})`;
-      }
-
-      // fluid variable typography — weight & tracking breathe with the cursor
-      if (!reduced) {
-        const w = Math.round(560 + pointer.speed * 320);
-        const ls = (0.004 - pointer.speed * 0.01).toFixed(4);
-        for (const el of cachedEls) {
-          el.style.fontVariationSettings = `'wght' ${w}`;
-          el.style.letterSpacing = `${ls}em`;
-        }
-      }
-
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      clearInterval(elInterval);
-      clearTimeout(t1);
-      clearTimeout(t2);
-      window.removeEventListener('resize', onResize);
-      cleanup();
-    };
-  }, [reduced]);
-
-  /* ---------- GSAP scroll reveals ---------- */
+  /* ---------- Lenis inertia scroll — wired into GSAP's ticker ---------- */
   useEffect(() => {
     if (reduced) return;
     gsap.registerPlugin(ScrollTrigger);
-    const ctx = gsap.context(() => {
-      gsap.utils.toArray<HTMLElement>('.kd-fade').forEach((el) => {
-        gsap.fromTo(
-          el,
-          { y: 34, opacity: 0 },
-          {
-            y: 0,
-            opacity: 1,
-            duration: 0.95,
-            ease: 'power3.out',
-            scrollTrigger: { trigger: el, start: 'top 88%', toggleActions: 'play none none none' },
-          }
-        );
-      });
+
+    const lenis = new Lenis({
+      duration: 1.45,
+      easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      smoothWheel: true,
+      touchMultiplier: 1.6,
     });
-    const t = setTimeout(() => ScrollTrigger.refresh(), 1200);
+    lenisRef.current = lenis;
+    (window as unknown as Record<string, unknown>).__lenis = lenis;
+
+    lenis.on('scroll', ScrollTrigger.update);
+    const raf = (time: number) => lenis.raf(time * 1000);
+    gsap.ticker.add(raf);
+    gsap.ticker.lagSmoothing(0);
+
+    // hold the curtain until the preloader finishes
+    lenis.stop();
+
     return () => {
-      ctx.revert();
-      clearTimeout(t);
+      gsap.ticker.remove(raf);
+      lenis.destroy();
+      lenisRef.current = null;
+      (window as unknown as Record<string, unknown>).__lenis = undefined;
     };
   }, [reduced]);
 
-  /* ---------- booking CTA scrolls to the closing chamber ---------- */
-  const scrollToBooking = useCallback(() => {
-    document.getElementById('book')?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
-  }, [reduced]);
+  useEffect(() => {
+    if (!ready) return;
+    lenisRef.current?.start();
+    const t = setTimeout(() => ScrollTrigger.refresh(), 900);
+    return () => clearTimeout(t);
+  }, [ready]);
+
+  /* ---------- luxury glide to anchors ---------- */
+  const scrollToId = useCallback(
+    (id: string) => {
+      const lenis = lenisRef.current;
+      if (lenis) {
+        lenis.scrollTo(id, { duration: 1.8, easing: (t: number) => 1 - Math.pow(1 - t, 4) });
+      } else {
+        document.querySelector(id)?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
+      }
+    },
+    [reduced]
+  );
+
+  const goReserve = useCallback(() => scrollToId('#book'), [scrollToId]);
+  const goExplore = useCallback(() => scrollToId('#ritual'), [scrollToId]);
 
   return (
-    <div className="kd-root relative">
-      {/* choreographed background stage (behind WebGL) */}
-      <div ref={bgRef} className="fixed inset-0 z-[-1] bg-[#0F172A]" aria-hidden="true" />
+    <div className="relative min-h-screen flex flex-col bg-[var(--ink)] text-[var(--ivory)] overflow-x-clip">
+      <Preloader onComplete={() => setReady(true)} />
+      <Cursor />
 
-      {/* WebGL stage or 2D fallback */}
-      {use3D ? <Experience /> : <Fallback2D />}
+      {/* cinematic texture layers */}
+      <div className="grain" aria-hidden="true" />
+      <div className="vignette" aria-hidden="true" />
 
-      <Nav onBook={scrollToBooking} />
+      <Nav onReserve={goReserve} />
 
-      <main className="relative z-10">
-        <HeroSection onBook={scrollToBooking} />
-        <DetoxSection />
-        <TourSection />
-        <ServicesSection />
-        <TransformationsSection />
-        <TeamSection />
-        <BookingSection />
+      <main className="relative z-10 flex-1">
+        <Hero webgl={webgl} ready={ready} onReserve={goReserve} onExplore={goExplore} />
+        <Ritual />
+        <Atelier webgl={webgl} />
+        <Treatments webgl={webgl} />
+        <Transformations />
+        <Doctor />
+        <Reserve />
       </main>
 
-      <Footer />
-
-      <MagneticBookingButton onClick={scrollToBooking} />
+      <Footer onReserve={goReserve} />
     </div>
   );
 }
