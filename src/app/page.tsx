@@ -1,5 +1,5 @@
-import KDentSite from "@/components/kdent/KDentSite";
+import LuxDentSite from "@/components/lux/LuxDentSite";
 
 export default function Home() {
-  return <KDentSite />;
+  return <LuxDentSite />;
 }
