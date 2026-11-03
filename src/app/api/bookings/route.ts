@@ -10,7 +10,7 @@ const bookingSchema = z.object({
     .regex(/^[0-9+\-\s()]+$/, "Phone can only contain digits, +, - and spaces"),
   service: z.string().min(2).max(80),
   date: z.string().min(4).max(20),
-  timeSlot: z.string().min(2).max(30),
+  timeSlot: z.string().min(2).max(40),
   notes: z.string().max(500).optional().nullable(),
 });
 
