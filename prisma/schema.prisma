@@ -13,20 +13,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
+model Booking {
   id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
+  name      String
+  phone     String
+  service   String
+  date      String
+  timeSlot  String
+  notes     String?
+  status    String   @default("pending")
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }

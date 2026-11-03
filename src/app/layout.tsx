@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
@@ -14,25 +14,39 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  title: "K Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
+  description:
+    "Where modern dentistry meets trusted care. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D) at Farhan Heights, Bani Gala, Islamabad. Rated 5.0★. Mon–Sat 10 AM–7 PM. Book on WhatsApp: 0332 5855589.",
+  keywords: [
+    "K Dent",
+    "dentist Bani Gala",
+    "dental clinic Islamabad",
+    "smile design Islamabad",
+    "clear aligners Islamabad",
+    "dental implants Bani Gala",
+    "root canal Bani Gala",
+    "Dr Yasir Arafat dentist",
+    "aesthetic dentistry Islamabad",
+  ],
+  authors: [{ name: "K Dent Dental & Aesthetic Care" }],
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "K Dent Dental & Aesthetic Care",
+    description:
+      "Immersive clinic experience — smile design, RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
     type: "website",
+    locale: "en_PK",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
+    title: "K Dent Dental & Aesthetic Care",
+    description: "Modern dentistry. Confident smiles. Bani Gala, Islamabad.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0F172A",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
