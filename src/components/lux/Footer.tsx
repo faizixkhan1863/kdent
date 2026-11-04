@@ -9,9 +9,9 @@ export default function Footer() {
   return (
     <footer className="sec-dark mt-auto border-t border-white/5">
       <div className="lux-container py-14 md:py-20">
-        <div className="grid gap-12 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+        <div className="grid grid-cols-1 gap-12 sm:grid-cols-2 md:gap-14 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           {/* Brand */}
-          <div>
+          <div className="sm:col-span-2 lg:col-span-1">
             <div className="font-display text-5xl leading-none text-white md:text-6xl">
               TK<span className="text-teal-3">·</span>Dent
             </div>

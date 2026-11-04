@@ -121,7 +121,7 @@ export default function Hero() {
       {/* 3D porcelain tooth — capable desktops; graceful zero-JS still elsewhere */}
       {sceneMode === "3d" && (
         <div className="scene-in absolute inset-0 z-0">
-          <ToothScene className="absolute inset-0 opacity-70 md:opacity-90 lg:opacity-100" />
+          <ToothScene className="absolute inset-0 opacity-60 md:opacity-85 lg:opacity-100" />
         </div>
       )}
       {sceneMode === "still" && <ToothStill className="absolute inset-0 z-0 opacity-75 md:opacity-90" />}
@@ -129,7 +129,7 @@ export default function Hero() {
       {/* legibility veil for the copy on small screens */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_70%_55%_at_28%_60%,rgba(250,252,251,0.9),transparent_70%)] lg:bg-[radial-gradient(ellipse_55%_60%_at_25%_55%,rgba(250,252,251,0.75),transparent_70%)]"
+        className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_95%_68%_at_50%_46%,rgba(250,252,251,0.95),rgba(250,252,251,0.55)_62%,transparent_78%)] md:bg-[radial-gradient(ellipse_80%_62%_at_38%_50%,rgba(250,252,251,0.9),rgba(250,252,251,0.4)_62%,transparent_78%)] lg:bg-[radial-gradient(ellipse_55%_60%_at_25%_55%,rgba(250,252,251,0.75),transparent_70%)]"
       />
 
       <div className="lux-container relative z-10 flex min-h-[100svh] items-center pt-28 pb-24 md:pt-32">
