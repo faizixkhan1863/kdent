@@ -18,26 +18,24 @@ const ToothScene = dynamic(() => import("../scenes/ToothScene"), { ssr: false })
 type SceneMode = "pending" | "still" | "3d";
 
 /**
- * WebGL policy — the 3D tooth only runs on capable desktops, and only after
- * the page is interactive. Phones, touch devices, low-core CPUs and
- * data-savers get a zero-JS static porcelain still instead: faster loads,
- * steady 60fps scrolling, no battery drain.
+ * WebGL policy — the full premium 3D scene runs on EVERY device (phones
+ * included), so the hero always keeps its ultra-premium look. The chunk still
+ * loads after first paint and the scene auto-tunes quality (DPR, sparkle
+ * count) per screen. Reduced-motion users get a calm static still instead.
  */
 function useSceneMode(): SceneMode {
   const [mode, setMode] = useState<SceneMode>("pending");
 
   useEffect(() => {
-    const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
-    // QA escape hatch — /?scene=3d forces the WebGL scene on any device.
-    const forced = new URLSearchParams(window.location.search).get("scene") === "3d";
-    const lowPower =
-      window.matchMedia("(max-width: 768px)").matches ||
-      window.matchMedia("(pointer: coarse)").matches ||
-      (navigator.hardwareConcurrency !== undefined && navigator.hardwareConcurrency <= 4) ||
-      conn?.saveData === true;
+    // QA escape hatches — /?scene=3d or /?scene=still force a mode.
+    const forced = new URLSearchParams(window.location.search).get("scene");
 
-    if (!forced && (lowPower || prefersReducedMotion())) {
-      // Next frame — instant to the eye, and keeps the effect body render-free.
+    if (forced === "3d") {
+      const raf = requestAnimationFrame(() => setMode("3d"));
+      return () => cancelAnimationFrame(raf);
+    }
+
+    if (forced === "still" || prefersReducedMotion()) {
       const raf = requestAnimationFrame(() => setMode("still"));
       return () => cancelAnimationFrame(raf);
     }
@@ -47,9 +45,9 @@ function useSceneMode(): SceneMode {
     let idleId = 0;
     let timerId = 0;
     if (typeof window.requestIdleCallback === "function") {
-      idleId = window.requestIdleCallback(go, { timeout: 1600 });
+      idleId = window.requestIdleCallback(go, { timeout: 1100 });
     } else {
-      timerId = window.setTimeout(go, 900);
+      timerId = window.setTimeout(go, 600);
     }
     return () => {
       if (idleId) window.cancelIdleCallback(idleId);
