@@ -46,7 +46,9 @@ export default function EnamelParticles({ className }: { className?: string }) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
-    const parts: Particle[] = Array.from({ length: 110 }, () => spawn(true));
+    // Fewer particles on phones — same shimmer, half the fill work.
+    const count = w < 768 ? 55 : 110;
+    const parts: Particle[] = Array.from({ length: count }, () => spawn(true));
 
     let visible = false;
     const io = new IntersectionObserver(([entry]) => {

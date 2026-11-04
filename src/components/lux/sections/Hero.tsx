@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowDown, ArrowRight, Star } from "lucide-react";
@@ -8,15 +8,62 @@ import dynamic from "next/dynamic";
 import Magnetic from "../ui/Magnetic";
 import SplitReveal from "../ui/SplitReveal";
 import Eyebrow from "../ui/Eyebrow";
+import ToothStill from "../scenes/ToothStill";
 import { scrollToId, scrollState, prefersReducedMotion } from "../lib/scroll";
 
 // three.js + R3F ship in their own async chunk — loaded after first paint,
 // keeping them out of the critical bundle for a much faster first load.
 const ToothScene = dynamic(() => import("../scenes/ToothScene"), { ssr: false });
 
+type SceneMode = "pending" | "still" | "3d";
+
+/**
+ * WebGL policy — the 3D tooth only runs on capable desktops, and only after
+ * the page is interactive. Phones, touch devices, low-core CPUs and
+ * data-savers get a zero-JS static porcelain still instead: faster loads,
+ * steady 60fps scrolling, no battery drain.
+ */
+function useSceneMode(): SceneMode {
+  const [mode, setMode] = useState<SceneMode>("pending");
+
+  useEffect(() => {
+    const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+    // QA escape hatch — /?scene=3d forces the WebGL scene on any device.
+    const forced = new URLSearchParams(window.location.search).get("scene") === "3d";
+    const lowPower =
+      window.matchMedia("(max-width: 768px)").matches ||
+      window.matchMedia("(pointer: coarse)").matches ||
+      (navigator.hardwareConcurrency !== undefined && navigator.hardwareConcurrency <= 4) ||
+      conn?.saveData === true;
+
+    if (!forced && (lowPower || prefersReducedMotion())) {
+      // Next frame — instant to the eye, and keeps the effect body render-free.
+      const raf = requestAnimationFrame(() => setMode("still"));
+      return () => cancelAnimationFrame(raf);
+    }
+
+    // Defer the chunk until the browser is idle so LCP/TTI stay untouched.
+    const go = () => setMode("3d");
+    let idleId = 0;
+    let timerId = 0;
+    if (typeof window.requestIdleCallback === "function") {
+      idleId = window.requestIdleCallback(go, { timeout: 1600 });
+    } else {
+      timerId = window.setTimeout(go, 900);
+    }
+    return () => {
+      if (idleId) window.cancelIdleCallback(idleId);
+      if (timerId) window.clearTimeout(timerId);
+    };
+  }, []);
+
+  return mode;
+}
+
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const sceneMode = useSceneMode();
 
   useEffect(() => {
     const section = sectionRef.current;
@@ -73,8 +120,13 @@ export default function Hero() {
         <div className="absolute bottom-[-18%] left-[-10%] h-[30rem] w-[30rem] rounded-full bg-mint/40 blur-3xl" />
       </div>
 
-      {/* 3D porcelain tooth */}
-      <ToothScene className="absolute inset-0 z-0 opacity-70 md:opacity-90 lg:opacity-100" />
+      {/* 3D porcelain tooth — capable desktops; graceful zero-JS still elsewhere */}
+      {sceneMode === "3d" && (
+        <div className="scene-in absolute inset-0 z-0">
+          <ToothScene className="absolute inset-0 opacity-70 md:opacity-90 lg:opacity-100" />
+        </div>
+      )}
+      {sceneMode === "still" && <ToothStill className="absolute inset-0 z-0 opacity-75 md:opacity-90" />}
 
       {/* legibility veil for the copy on small screens */}
       <div
