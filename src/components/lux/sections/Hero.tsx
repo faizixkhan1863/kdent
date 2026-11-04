@@ -60,7 +60,7 @@ export default function Hero() {
       ref={sectionRef}
       id="hero"
       className="sec-porcelain relative min-h-[100svh] overflow-hidden"
-      aria-label="K Dent — introduction"
+      aria-label="TK Dent — introduction"
     >
       {/* décor rings */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
@@ -99,7 +99,7 @@ export default function Hero() {
           </h1>
 
           <SplitReveal
-            text="K Dent is a boutique dental studio where FCPS-led surgical precision meets spa-calm comfort — every smile designed, polished and protected like fine porcelain."
+            text="TK Dent is a boutique dental studio where FCPS-led surgical precision meets spa-calm comfort — every smile designed, polished and protected like fine porcelain."
             start="load"
             delay={0.85}
             className="body-lux mt-7 block max-w-xl"

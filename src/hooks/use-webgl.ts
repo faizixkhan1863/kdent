@@ -27,7 +27,7 @@ export function useWebGLSupport(): boolean {
 
   useEffect(() => {
     if (!supported) {
-      console.warn('[K Dent] WebGL unavailable — switching to 2D fallback.');
+      console.warn('[TK Dent] WebGL unavailable — switching to 2D fallback.');
     }
   }, [supported]);
 

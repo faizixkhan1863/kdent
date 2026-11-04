@@ -1,4 +1,4 @@
-# K Dent Dental & Aesthetic Care — Complete Research File
+# TK Dent Dental & Aesthetic Care — Complete Research File
 > Ye file website banane ke liye research data rakhti hai. Source: Google, Facebook ("Only Bani Gala" group posts), Instagram (@kdent_care), DigiCard.pk — researched on current date.
 
 ---
@@ -7,10 +7,10 @@
 
 | Field | Detail |
 |---|---|
-| **Clinic Name** | K Dent Dental & Aesthetic Care (also: K DENT DENTAL & AESTHETIC CLINIC) |
+| **Clinic Name** | TK Dent Dental & Aesthetic Care (rebranded from "K Dent") |
 | **Owner / Head Dentist** | Dr. Tanveer Khokhar |
-| **Address** | Shop G-7, Farhan Heights, Jinnah Road, Bani Gala, Islamabad, Pakistan |
-| **Phone / WhatsApp** | 0332 5855589 (+92 332 5855589) |
+| **Address** | House 34-C, Akram Road, Bani Gala, Islamabad, Pakistan |
+| **Phone / WhatsApp** | 0312 3329479 (+92 312 3329479) |
 | **Instagram** | @kdent_care |
 | **Facebook** | Active in "Only Bani Gala" FB group; page name "K Dent ▻ Only Bani Gala" |
 | **Google/DigiCard Rating** | ⭐ 5.0 (19 reviews) |
@@ -76,7 +76,7 @@
 
 - Tagline ideas from posts: *"Where Modern Dentistry Meets Trusted Care"* · *"Modern dentistry. Confident smiles."*
 - Tone: Professional, Gentle, Trusted, Modern
-- Booking flow: DM on Instagram / WhatsApp 0332 5855589
+- Booking flow: DM on Instagram / WhatsApp 0312 3329479
 - Hashtags used: #KDent #GrandOpening #DentalClinic #ModernDentistry #HealthySmiles
 
 ---
@@ -90,7 +90,7 @@
 5. **Smile Gallery / Before-After** (client to provide photos)
 6. **Offers Banner** — current promotions
 7. **Appointment Booking Form** — name, phone, service, preferred date → WhatsApp/API
-8. **Contact + Map** — Shop G-7, Farhan Heights, Jinnah Road, Bani Gala + timings
+8. **Contact + Map** — House 34-C, Akram Road, Bani Gala + timings
 9. **Testimonials** — based on 5.0★ / 19 reviews
 
 > **Pending from client:** clinic interior photos, doctor's photo, logo, price list confirmation, any additional team members.

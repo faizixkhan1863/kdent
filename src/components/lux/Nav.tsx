@@ -39,10 +39,10 @@ export default function Nav() {
         <button
           onClick={() => scrollToId("#hero")}
           className="group flex items-baseline gap-2 rounded-full px-2 py-1"
-          aria-label="K Dent — back to top"
+          aria-label="TK Dent — back to top"
         >
           <span className="font-display text-2xl leading-none text-ink transition-colors group-hover:text-teal md:text-[1.7rem]">
-            K<span className="text-teal">·</span>Dent
+            TK<span className="text-teal">·</span>Dent
           </span>
           <span className="hidden text-[9px] font-semibold uppercase tracking-[0.32em] text-muted-ink sm:inline">
             Dental &amp; Aesthetic
@@ -72,9 +72,9 @@ export default function Nav() {
         {/* Actions */}
         <div className="flex items-center gap-2">
           <a
-            href="tel:+923325855589"
+            href="tel:+923123329479"
             className="hidden h-11 w-11 items-center justify-center rounded-full border border-ink/12 bg-white/60 backdrop-blur-xl transition-all duration-500 hover:border-teal/60 hover:text-teal md:flex"
-            aria-label="Call K Dent — 0332 5855589"
+            aria-label="Call TK Dent — 0312 3329479"
           >
             <Phone className="h-4 w-4" />
           </a>

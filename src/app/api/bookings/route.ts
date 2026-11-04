@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     // 2) WhatsApp deep-link so the clinic receives the request instantly.
     const waMessage = encodeURIComponent(
-      `Assalamualaikum! I would like to book an appointment at K Dent.\n\n` +
+      `Assalamualaikum! I would like to book an appointment at TK Dent.\n\n` +
         `Name: ${name}\n` +
         `Service: ${service}\n` +
         `Preferred Date: ${date}\n` +
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
         (notes ? `Notes: ${notes}\n` : "") +
         `\n(Booking ref: ${bookingId.slice(-6).toUpperCase()})`
     );
-    const whatsappUrl = `https://wa.me/923325855589?text=${waMessage}`;
+    const whatsappUrl = `https://wa.me/923123329479?text=${waMessage}`;
 
     return NextResponse.json({
       success: true,
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
       {
         success: false,
         error:
-          "Something went wrong. Please call us directly at 0332 5855589.",
+          "Something went wrong. Please call us directly at 0312 3329479.",
       },
       { status: 500 }
     );

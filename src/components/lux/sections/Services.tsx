@@ -69,7 +69,7 @@ const SERVICES = [
 
 export default function Services() {
   return (
-    <section id="services" className="sec-porcelain relative overflow-hidden" aria-label="Treatments at K Dent">
+    <section id="services" className="sec-porcelain relative overflow-hidden" aria-label="Treatments at TK Dent">
       <div className="lux-container py-24 md:py-36">
         <div className="grid gap-14 lg:grid-cols-[1fr_1.35fr] lg:gap-20">
           {/* sticky intro */}

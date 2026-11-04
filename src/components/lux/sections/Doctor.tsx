@@ -30,7 +30,7 @@ export default function Doctor() {
             <div className="lux-frame relative aspect-[3/4] overflow-hidden rounded-t-[10rem] rounded-b-[2rem]">
               <Image
                 src="/kdent/doctor-portrait.jpg"
-                alt="Dr. Tanveer Khokhar — Oral & Maxillofacial Surgeon at K Dent"
+                alt="Dr. Tanveer Khokhar — Oral & Maxillofacial Surgeon at TK Dent"
                 fill
                 sizes="(min-width: 1024px) 40vw, 90vw"
                 className="object-cover"
@@ -60,7 +60,7 @@ export default function Doctor() {
             <p className="body-lux mt-6 max-w-xl">
               Great dentistry should feel calm, precise and honest — you&rsquo;ll feel the
               difference within the first ten minutes of your visit. From a simple filling to a
-              complex implant, every case at K Dent is personally planned and treated by Dr.
+              complex implant, every case at TK Dent is personally planned and treated by Dr.
               Tanveer.
             </p>
 
@@ -79,7 +79,7 @@ export default function Doctor() {
 
             <div className="mt-9 flex flex-wrap gap-4">
               <a
-                href="https://wa.me/923325855589?text=Assalamualaikum!%20I%20would%20like%20a%20consultation%20with%20Dr.%20Tanveer%20Khokhar."
+                href="https://wa.me/923123329479?text=Assalamualaikum!%20I%20would%20like%20a%20consultation%20with%20Dr.%20Tanveer%20Khokhar."
                 target="_blank"
                 rel="noreferrer"
                 className="btn-teal"

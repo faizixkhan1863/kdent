@@ -13,7 +13,7 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <div className="font-display text-5xl leading-none text-white md:text-6xl">
-              K<span className="text-teal-3">·</span>Dent
+              TK<span className="text-teal-3">·</span>Dent
             </div>
             <p className="serif-accent-dark mt-3 text-lg">Where modern dentistry meets trusted care.</p>
             <p className="mt-5 max-w-xs text-sm leading-relaxed text-[rgba(222,242,238,0.55)]">
@@ -29,16 +29,16 @@ export default function Footer() {
               <li className="flex gap-3">
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-teal-3" />
                 <span>
-                  Shop G-7, Farhan Heights,
+                  House 34-C, Akram Road,
                   <br />
-                  Jinnah Road, Bani Gala,
+                  Bani Gala,
                   <br />
                   Islamabad
                 </span>
               </li>
               <li>
                 <a
-                  href="https://www.google.com/maps/search/?api=1&query=K+Dent+Dental+%26+Aesthetic+Care+Bani+Gala+Islamabad"
+                  href="https://www.google.com/maps/search/?api=1&query=TK+Dent+Dental+%26+Aesthetic+Care+Akram+Road+Bani+Gala+Islamabad"
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-mint-glow underline-offset-4 hover:underline"
@@ -71,17 +71,17 @@ export default function Footer() {
             <ul className="mt-5 space-y-3 text-sm text-[rgba(222,242,238,0.66)]">
               <li>
                 <a
-                  href="https://wa.me/923325855589"
+                  href="https://wa.me/923123329479"
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-3 transition-colors hover:text-white"
                 >
-                  <MessageCircle className="h-4 w-4 text-teal-3" /> 0332 5855589
+                  <MessageCircle className="h-4 w-4 text-teal-3" /> 0312 3329479
                 </a>
               </li>
               <li>
-                <a href="tel:+923325855589" className="flex items-center gap-3 transition-colors hover:text-white">
-                  <Phone className="h-4 w-4 text-teal-3" /> +92 332 5855589
+                <a href="tel:+923123329479" className="flex items-center gap-3 transition-colors hover:text-white">
+                  <Phone className="h-4 w-4 text-teal-3" /> +92 312 3329479
                 </a>
               </li>
               <li>
@@ -108,7 +108,7 @@ export default function Footer() {
 
         <div className="hairline-dark mt-14" />
         <div className="mt-6 flex flex-col items-start justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-[rgba(222,242,238,0.35)] md:flex-row md:items-center">
-          <span>© {year} K Dent Dental &amp; Aesthetic Care</span>
+          <span>© {year} TK Dent Dental &amp; Aesthetic Care</span>
           <span>Dr. Tanveer Khokhar · PMDC 717175-03-D</span>
         </div>
       </div>
