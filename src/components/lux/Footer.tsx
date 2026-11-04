@@ -102,12 +102,12 @@ export default function Footer() {
           <span>
             Website by{" "}
             <a
-              href="https://synkew.com"
+              href="https://synkrew.solutions"
               target="_blank"
               rel="noreferrer"
               className="font-semibold text-[rgba(222,242,238,0.6)] transition-colors hover:text-white"
             >
-              Synkew
+              Synkrew
             </a>
           </span>
           <span>Dr. Tanveer Khokhar · PMDC 717175-03-D</span>

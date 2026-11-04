@@ -56,24 +56,24 @@ function Molar({ position, rotation, scale = 1 }: ToothProps) {
         ] as const
       ).map(([x, z], i) => (
         <mesh key={i} position={[x, 0.62, z]} scale={[0.34, 0.22, 0.34]}>
-          <sphereGeometry args={[1, 32, 32]} />
+          <sphereGeometry args={[1, 20, 20]} />
           <Porcelain />
         </mesh>
       ))}
       {/* neck / gum line */}
       <mesh position={[0, -0.62, 0]} scale={[1.02, 0.46, 0.94]}>
-        <sphereGeometry args={[1, 48, 48]} />
+        <sphereGeometry args={[1, 32, 32]} />
         <Porcelain />
       </mesh>
       {/* roots */}
       {[-0.38, 0.38].map((x) => (
         <group key={x} position={[x, -0.78, 0]} rotation={[0, 0, x > 0 ? -0.12 : 0.12]}>
           <mesh position={[0, -0.55, 0]} rotation={[Math.PI, 0, 0]}>
-            <coneGeometry args={[0.27, 1.15, 40]} />
+            <coneGeometry args={[0.27, 1.15, 28]} />
             <Porcelain />
           </mesh>
           <mesh position={[0, -1.14, 0]}>
-            <sphereGeometry args={[0.085, 20, 20]} />
+            <sphereGeometry args={[0.085, 14, 14]} />
             <Porcelain />
           </mesh>
         </group>
@@ -89,20 +89,20 @@ function Incisor({ position, rotation, scale = 1 }: ToothProps) {
   return (
     <group position={position} rotation={rotation} scale={scale}>
       <mesh scale={[0.64, 0.8, 0.5]}>
-        <sphereGeometry args={[1, 48, 48]} />
+        <sphereGeometry args={[1, 32, 32]} />
         <Porcelain />
       </mesh>
       <mesh position={[0, -0.55, 0]} scale={[0.82, 0.42, 0.68]}>
-        <sphereGeometry args={[1, 32, 32]} />
+        <sphereGeometry args={[1, 24, 24]} />
         <Porcelain />
       </mesh>
       <group position={[0, -0.78, 0]} rotation={[0, 0, 0.06]}>
         <mesh position={[0, -0.42, 0]} rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.2, 0.9, 32]} />
+          <coneGeometry args={[0.2, 0.9, 24]} />
           <Porcelain />
         </mesh>
         <mesh position={[0, -0.86, 0]}>
-          <sphereGeometry args={[0.06, 16, 16]} />
+          <sphereGeometry args={[0.06, 12, 12]} />
           <Porcelain />
         </mesh>
       </group>
@@ -123,12 +123,12 @@ function Mirror({ position, rotation, scale = 1 }: ToothProps) {
       </mesh>
       {/* head rim */}
       <mesh>
-        <torusGeometry args={[0.44, 0.05, 24, 48]} />
+        <torusGeometry args={[0.44, 0.05, 16, 40]} />
         <SteelMaterial />
       </mesh>
       {/* reflective face */}
       <mesh position={[0, 0, -0.015]} rotation={[0.12, 0, 0]}>
-        <circleGeometry args={[0.42, 48]} />
+        <circleGeometry args={[0.42, 40]} />
         <meshStandardMaterial color="#f2fbf9" metalness={0.75} roughness={0.1} envMapIntensity={1.6} />
       </mesh>
     </group>
@@ -197,9 +197,9 @@ export default function ToothScene({ className }: { className?: string }) {
   return (
     <div ref={wrapper} className={className} aria-hidden="true">
       <Canvas
-        dpr={[1, 1.75]}
+        dpr={[1, 1.5]}
         camera={{ position: [0, -0.1, 8.6], fov: 34 }}
-        gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+        gl={{ antialias: true, alpha: true, powerPreference: "high-performance", stencil: false }}
         frameloop={inView ? "always" : "never"}
       >
         <ambientLight intensity={0.55} />
@@ -219,10 +219,10 @@ export default function ToothScene({ className }: { className?: string }) {
             <Float speed={1.9} rotationIntensity={0.5} floatIntensity={1.1}>
               <Incisor position={[2.6, -2.2, -1.6]} rotation={[-0.2, -0.6, 0.45]} scale={0.55} />
             </Float>
-            <Sparkles count={70} scale={[11, 7, 5]} size={2.2} speed={0.32} opacity={0.55} color="#9ce6da" />
-            <Sparkles count={24} scale={[7, 4.5, 3.5]} size={4.5} speed={0.2} opacity={0.32} color="#ffffff" />
+            <Sparkles count={44} scale={[11, 7, 5]} size={2.2} speed={0.32} opacity={0.55} color="#9ce6da" />
+            <Sparkles count={14} scale={[7, 4.5, 3.5]} size={4.5} speed={0.2} opacity={0.32} color="#ffffff" />
           </Rig>
-          <ContactShadows position={[0, -2.85, 0]} opacity={0.2} scale={14} blur={2.8} far={4.5} color="#05302f" />
+          <ContactShadows position={[0, -2.85, 0]} opacity={0.2} scale={14} blur={2.8} far={4.5} resolution={256} color="#05302f" />
           {/* Procedural studio environment — no external HDR fetch */}
           <Environment resolution={256}>
             <group rotation={[-Math.PI / 3, 0, 0]}>
