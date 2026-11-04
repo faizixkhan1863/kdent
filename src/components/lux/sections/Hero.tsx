@@ -133,7 +133,7 @@ export default function Hero() {
               </span>
             </span>
             <span className="hidden h-1 w-1 rounded-full bg-teal/50 sm:inline-block" aria-hidden="true" />
-            <span>PMDC 717176-03-D</span>
+            <span>PMDC 717175-03-D</span>
             <span className="hidden h-1 w-1 rounded-full bg-teal/50 sm:inline-block" aria-hidden="true" />
             <span>Mon–Sat 10 AM – 7 PM</span>
           </div>

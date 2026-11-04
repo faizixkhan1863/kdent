@@ -15,7 +15,7 @@ const CREDENTIALS = [
 
 export default function Doctor() {
   return (
-    <section id="doctor" className="sec-porcelain relative overflow-hidden" aria-label="Meet Dr. Yasir Arafat">
+    <section id="doctor" className="sec-porcelain relative overflow-hidden" aria-label="Meet Dr. Tanveer Khokhar">
       {/* décor */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
         <div className="lux-spin-slow absolute left-[-16%] top-[8%] h-[38rem] w-[38rem] rounded-full border border-teal/10" />
@@ -30,7 +30,7 @@ export default function Doctor() {
             <div className="lux-frame relative aspect-[3/4] overflow-hidden rounded-t-[10rem] rounded-b-[2rem]">
               <Image
                 src="/kdent/doctor-portrait.jpg"
-                alt="Dr. Yasir Arafat — Oral & Maxillofacial Surgeon at K Dent"
+                alt="Dr. Tanveer Khokhar — Oral & Maxillofacial Surgeon at K Dent"
                 fill
                 sizes="(min-width: 1024px) 40vw, 90vw"
                 className="object-cover"
@@ -39,7 +39,7 @@ export default function Doctor() {
             <div className="lux-card absolute -bottom-6 left-1/2 flex w-[86%] -translate-x-1/2 items-center gap-3 p-4">
               <GraduationCap className="h-5 w-5 shrink-0 text-teal" aria-hidden="true" />
               <div className="text-xs leading-snug text-muted-ink">
-                <span className="font-bold text-ink">Dr. Yasir Arafat</span>
+                <span className="font-bold text-ink">Dr. Tanveer Khokhar</span>
                 <br />
                 FCPS (PGR) · Oral &amp; Maxillofacial Surgery
               </div>
@@ -52,7 +52,7 @@ export default function Doctor() {
               <Eyebrow>The Surgeon</Eyebrow>
             </Reveal>
             <h2 className="display-lg mt-7 text-ink">
-              <SplitReveal text="Dr. Yasir Arafat" stagger={0.06} />
+              <SplitReveal text="Dr. Tanveer Khokhar" stagger={0.06} />
             </h2>
             <p className="serif-accent mt-2 text-xl md:text-2xl">
               Oral &amp; Maxillofacial Surgeon · Endodontist
@@ -61,7 +61,7 @@ export default function Doctor() {
               Great dentistry should feel calm, precise and honest — you&rsquo;ll feel the
               difference within the first ten minutes of your visit. From a simple filling to a
               complex implant, every case at K Dent is personally planned and treated by Dr.
-              Yasir.
+              Tanveer.
             </p>
 
             <dl className="mt-10 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-ink/10 bg-ink/5 sm:grid-cols-2">
@@ -74,12 +74,12 @@ export default function Doctor() {
             </dl>
 
             <p className="mt-6 inline-flex items-center gap-2 rounded-full border border-teal/25 bg-mint/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-2">
-              PMDC Registered · 717176-03-D
+              PMDC Registered · 717175-03-D
             </p>
 
             <div className="mt-9 flex flex-wrap gap-4">
               <a
-                href="https://wa.me/923325855589?text=Assalamualaikum!%20I%20would%20like%20a%20consultation%20with%20Dr.%20Yasir%20Arafat."
+                href="https://wa.me/923325855589?text=Assalamualaikum!%20I%20would%20like%20a%20consultation%20with%20Dr.%20Tanveer%20Khokhar."
                 target="_blank"
                 rel="noreferrer"
                 className="btn-teal"

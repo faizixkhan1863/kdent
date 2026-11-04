@@ -8,7 +8,7 @@
 | Field | Detail |
 |---|---|
 | **Clinic Name** | K Dent Dental & Aesthetic Care (also: K DENT DENTAL & AESTHETIC CLINIC) |
-| **Owner / Head Dentist** | Dr. Yasir Arafat |
+| **Owner / Head Dentist** | Dr. Tanveer Khokhar |
 | **Address** | Shop G-7, Farhan Heights, Jinnah Road, Bani Gala, Islamabad, Pakistan |
 | **Phone / WhatsApp** | 0332 5855589 (+92 332 5855589) |
 | **Instagram** | @kdent_care |
@@ -19,13 +19,13 @@
 
 ---
 
-## 2. Doctor Profile — Dr. Yasir Arafat
+## 2. Doctor Profile — Dr. Tanveer Khokhar
 
 - **BDS** (KMU — Khyber Medical University)
 - **RDS (Pak)** — Registered Dental Surgeon, Pakistan
 - **FCPS (PGR Oral & Maxillofacial Surgery)** — FCPS postgraduate resident/trainee in Oral & Maxillofacial Surgery
 - **C-Endo (Isb)** — Certificate in Endodontics (Islamabad)
-- **PMDC Registration #:** 717176-03-D
+- **PMDC Registration #:** 717175-03-D
 - Positioning: "Modern dentistry. Confident smiles."
 
 ---
@@ -84,7 +84,7 @@
 ## 6. Website Content Suggestion (pages/sections)
 
 1. **Hero** — Clinic name + tagline + CTA (WhatsApp booking) + rating badge (5.0★)
-2. **About / Meet the Doctor** — Dr. Yasir Arafat profile with qualifications & PMDC #
+2. **About / Meet the Doctor** — Dr. Tanveer Khokhar profile with qualifications & PMDC #
 3. **Services Grid** — 8–10 services with icons
 4. **Why Choose Us** — sterilization, modern equipment, family-friendly, affordability
 5. **Smile Gallery / Before-After** (client to provide photos)
