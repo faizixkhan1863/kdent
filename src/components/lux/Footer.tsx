@@ -109,7 +109,7 @@ export default function Footer() {
         <div className="hairline-dark mt-14" />
         <div className="mt-6 flex flex-col items-start justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-[rgba(222,242,238,0.35)] md:flex-row md:items-center">
           <span>© {year} K Dent Dental &amp; Aesthetic Care</span>
-          <span>Dr. Yasir Arafat · PMDC 717176-03-D</span>
+          <span>Dr. Tanveer Khokhar · PMDC 717175-03-D</span>
         </div>
       </div>
     </footer>

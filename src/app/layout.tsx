@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "K Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
   description:
-    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Yasir Arafat (PMDC 717176-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0332 5855589.",
+    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Tanveer Khokhar (PMDC 717175-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0332 5855589.",
   keywords: [
     "K Dent",
     "dentist Bani Gala",
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
     "clear aligners Islamabad",
     "dental implants Bani Gala",
     "root canal Bani Gala",
-    "Dr Yasir Arafat dentist",
+    "Dr Tanveer Khokhar dentist",
     "aesthetic dentistry Islamabad",
     "luxury dental clinic Islamabad",
   ],
