@@ -145,15 +145,19 @@ function Rig({ children }: { children: React.ReactNode }) {
   useFrame((state, dt) => {
     const g = group.current;
     if (!g) return;
-    const wide = state.size.width >= 1024;
+    const w = state.size.width;
+    const desktop = w >= 1024;
+    const tablet = w >= 768 && w < 1024;
     const reduced = prefersReducedMotion();
     const { pointer } = state;
 
     const targetRotY = (reduced ? 0 : pointer.x * 0.32 + scrollState.hero * 1.7) + 0.45;
     const targetRotX = (reduced ? 0 : -pointer.y * 0.16 + scrollState.hero * 0.22) + 0.08;
-    const targetX = wide ? 1.55 : 0;
-    const targetY = (wide ? 0.15 : 0.55) - scrollState.hero * 1.15;
-    const targetScale = wide ? 1 : 0.78;
+    // Desktop: right of the copy. Tablet: tucked to the right edge.
+    // Phone: smaller and dropped to the lower half so the headline stays crisp.
+    const targetX = desktop ? 1.55 : tablet ? 1.3 : 0.3;
+    const targetY = (desktop ? 0.15 : tablet ? -0.05 : -0.55) - scrollState.hero * 1.15;
+    const targetScale = desktop ? 1 : tablet ? 0.82 : 0.62;
 
     g.rotation.y = THREE.MathUtils.damp(g.rotation.y, targetRotY, 3.5, dt);
     g.rotation.x = THREE.MathUtils.damp(g.rotation.x, targetRotX, 3.5, dt);

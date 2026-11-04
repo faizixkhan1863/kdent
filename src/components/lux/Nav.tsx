@@ -49,10 +49,10 @@ export default function Nav() {
           </span>
         </button>
 
-        {/* Links */}
+        {/* Links — compact on tablet, full-size on desktop */}
         <nav
           aria-label="Primary"
-          className={`hidden items-center gap-1 rounded-full border px-2 py-1.5 backdrop-blur-xl transition-all duration-700 lg:flex ${
+          className={`hidden items-center gap-0.5 rounded-full border px-1.5 py-1.5 backdrop-blur-xl transition-all duration-700 md:flex md:gap-0 lg:gap-1 lg:px-2 ${
             scrolled
               ? "border-ink/10 bg-white/75 shadow-[0_20px_50px_-30px_rgba(7,39,43,0.4)]"
               : "border-transparent bg-white/40"
@@ -62,7 +62,7 @@ export default function Nav() {
             <button
               key={l.href}
               onClick={() => scrollToId(l.href)}
-              className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/70 transition-all duration-500 hover:bg-mint hover:text-teal-2"
+              className="rounded-full px-2.5 py-2 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-ink/70 transition-all duration-500 hover:bg-mint hover:text-teal-2 md:px-3 lg:px-4 lg:text-[11px] lg:tracking-[0.18em]"
             >
               {l.label}
             </button>
@@ -73,7 +73,7 @@ export default function Nav() {
         <div className="flex items-center gap-2">
           <a
             href="tel:+923123329479"
-            className="hidden h-11 w-11 items-center justify-center rounded-full border border-ink/12 bg-white/60 backdrop-blur-xl transition-all duration-500 hover:border-teal/60 hover:text-teal md:flex"
+            className="hidden h-11 w-11 items-center justify-center rounded-full border border-ink/12 bg-white/60 backdrop-blur-xl transition-all duration-500 hover:border-teal/60 hover:text-teal lg:flex"
             aria-label="Call TK Dent — 0312 3329479"
           >
             <Phone className="h-4 w-4" />
