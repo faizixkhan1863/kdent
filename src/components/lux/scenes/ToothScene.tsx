@@ -177,11 +177,13 @@ function Rig({ children }: { children: React.ReactNode }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Scene                                                              */
+/*  Scene — full premium 3D on every device; quality auto-tunes        */
 /* ------------------------------------------------------------------ */
 export default function ToothScene({ className }: { className?: string }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(true);
+  // ToothScene is client-only (dynamic ssr:false) — matchMedia is safe here.
+  const isSmall = typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches;
 
   // Pause rendering when the hero leaves the viewport.
   useEffect(() => {
@@ -197,7 +199,7 @@ export default function ToothScene({ className }: { className?: string }) {
   return (
     <div ref={wrapper} className={className} aria-hidden="true">
       <Canvas
-        dpr={[1, 1.5]}
+        dpr={[1, isSmall ? 1.25 : 1.5]}
         camera={{ position: [0, -0.1, 8.6], fov: 34 }}
         gl={{ antialias: true, alpha: true, powerPreference: "high-performance", stencil: false }}
         frameloop={inView ? "always" : "never"}
@@ -219,8 +221,8 @@ export default function ToothScene({ className }: { className?: string }) {
             <Float speed={1.9} rotationIntensity={0.5} floatIntensity={1.1}>
               <Incisor position={[2.6, -2.2, -1.6]} rotation={[-0.2, -0.6, 0.45]} scale={0.55} />
             </Float>
-            <Sparkles count={44} scale={[11, 7, 5]} size={2.2} speed={0.32} opacity={0.55} color="#9ce6da" />
-            <Sparkles count={14} scale={[7, 4.5, 3.5]} size={4.5} speed={0.2} opacity={0.32} color="#ffffff" />
+            <Sparkles count={isSmall ? 30 : 44} scale={[11, 7, 5]} size={2.2} speed={0.32} opacity={0.55} color="#9ce6da" />
+            <Sparkles count={isSmall ? 8 : 14} scale={[7, 4.5, 3.5]} size={4.5} speed={0.2} opacity={0.32} color="#ffffff" />
           </Rig>
           <ContactShadows position={[0, -2.85, 0]} opacity={0.2} scale={14} blur={2.8} far={4.5} resolution={256} color="#05302f" />
           {/* Procedural studio environment — no external HDR fetch */}
