@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07272B"/>
+      <stop offset="0.55" stop-color="#0B6B63"/>
+      <stop offset="1" stop-color="#12A89B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.22" r="0.62">
+      <stop offset="0" stop-color="#9CE6DA" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#9CE6DA" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="enamel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F2FBF8"/>
+      <stop offset="1" stop-color="#CFEAE4"/>
+    </linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.55" stop-color="#0E8F84" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0E8F84" stop-opacity="0.20"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="13"/>
+    </filter>
+  </defs>
+
+  <!-- background squircle -->
+  <rect x="0" y="0" width="512" height="512" rx="115" fill="url(#bg)"/>
+  <rect x="0" y="0" width="512" height="512" rx="115" fill="url(#glow)"/>
+
+  <!-- tooth -->
+  <g>
+    <!-- soft drop shadow -->
+    <path transform="translate(0 14)" filter="url(#soft)" fill="#03181B" opacity="0.42"
+      d="M256 148 C264 116 298 94 330 102 C374 113 398 154 398 202 C398 238 388 264 374 294 C363 317 353 347 347 376 C341 405 331 422 316 420 C299 418 295 392 289 362 C283 332 275 306 256 306 C237 306 229 332 223 362 C217 392 213 418 196 420 C181 422 171 405 165 376 C159 347 149 317 138 294 C124 264 114 238 114 202 C114 154 138 113 182 102 C214 94 248 116 256 148 Z"/>
+    <!-- enamel body -->
+    <path fill="url(#enamel)"
+      d="M256 148 C264 116 298 94 330 102 C374 113 398 154 398 202 C398 238 388 264 374 294 C363 317 353 347 347 376 C341 405 331 422 316 420 C299 418 295 392 289 362 C283 332 275 306 256 306 C237 306 229 332 223 362 C217 392 213 418 196 420 C181 422 171 405 165 376 C159 347 149 317 138 294 C124 264 114 238 114 202 C114 154 138 113 182 102 C214 94 248 116 256 148 Z"/>
+    <!-- lower teal shade -->
+    <path fill="url(#shade)"
+      d="M256 148 C264 116 298 94 330 102 C374 113 398 154 398 202 C398 238 388 264 374 294 C363 317 353 347 347 376 C341 405 331 422 316 420 C299 418 295 392 289 362 C283 332 275 306 256 306 C237 306 229 332 223 362 C217 392 213 418 196 420 C181 422 171 405 165 376 C159 347 149 317 138 294 C124 264 114 238 114 202 C114 154 138 113 182 102 C214 94 248 116 256 148 Z"/>
+    <!-- glossy highlight -->
+    <ellipse cx="182" cy="182" rx="21" ry="42" fill="#FFFFFF" opacity="0.85" transform="rotate(-20 182 182)"/>
+    <ellipse cx="316" cy="160" rx="10" ry="22" fill="#FFFFFF" opacity="0.5" transform="rotate(14 316 160)"/>
+  </g>
+
+  <!-- sparkles -->
+  <path fill="#A8EFE0" d="M418 74 l5.5 16.5 16.5 5.5 -16.5 5.5 -5.5 16.5 -5.5 -16.5 -16.5 -5.5 16.5 -5.5 Z"/>
+  <path fill="#A8EFE0" opacity="0.85" d="M448 142 l3.5 10.5 10.5 3.5 -10.5 3.5 -3.5 10.5 -3.5 -10.5 -10.5 -3.5 10.5 -3.5 Z"/>
+</svg>
