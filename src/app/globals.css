@@ -520,7 +520,7 @@ html.lenis body {
 /* ---- grain ---- */
 .grain {
   position: fixed;
-  inset: -50%;
+  inset: -25%;
   z-index: 80;
   pointer-events: none;
   opacity: 0.045;
@@ -674,5 +674,12 @@ html.lenis body {
   }
   * {
     scroll-behavior: auto !important;
+  }
+}
+
+/* Grain shimmer is wasted GPU work on touch devices — keep it static there. */
+@media (hover: none) and (pointer: coarse) {
+  .grain {
+    animation: none !important;
   }
 }

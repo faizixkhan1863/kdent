@@ -4,11 +4,15 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowDown, ArrowRight, Star } from "lucide-react";
-import ToothScene from "../scenes/ToothScene";
+import dynamic from "next/dynamic";
 import Magnetic from "../ui/Magnetic";
 import SplitReveal from "../ui/SplitReveal";
 import Eyebrow from "../ui/Eyebrow";
 import { scrollToId, scrollState, prefersReducedMotion } from "../lib/scroll";
+
+// three.js + R3F ship in their own async chunk — loaded after first paint,
+// keeping them out of the critical bundle for a much faster first load.
+const ToothScene = dynamic(() => import("../scenes/ToothScene"), { ssr: false });
 
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null);

@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  images: {
+    // AVIF-first: clinic photos get ~30% smaller than WebP on Vercel's CDN.
+    formats: ["image/avif", "image/webp"],
+  },
 };
 
 export default nextConfig;

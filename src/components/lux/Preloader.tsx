@@ -51,7 +51,7 @@ export default function Preloader() {
 
     Promise.all([
       document.fonts.ready,
-      new Promise((r) => setTimeout(r, 750)),
+      new Promise((r) => setTimeout(r, 250)),
     ]).then(start);
 
     return () => {
