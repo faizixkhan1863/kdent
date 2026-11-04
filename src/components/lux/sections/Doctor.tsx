@@ -88,13 +88,13 @@ export default function Doctor() {
                 Consult on WhatsApp
               </a>
               <a
-                href="https://instagram.com/kdent_care"
+                href="https://instagram.com/TK_dent_care"
                 target="_blank"
                 rel="noreferrer"
                 className="btn-ghost-ink"
               >
                 <Instagram className="h-4 w-4" />
-                @kdent_care
+                @TK_dent_care
               </a>
             </div>
           </div>

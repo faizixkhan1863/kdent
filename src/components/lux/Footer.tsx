@@ -36,16 +36,6 @@ export default function Footer() {
                   Islamabad
                 </span>
               </li>
-              <li>
-                <a
-                  href="https://www.google.com/maps/search/?api=1&query=TK+Dent+Dental+%26+Aesthetic+Care+Akram+Road+Bani+Gala+Islamabad"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-mint-glow underline-offset-4 hover:underline"
-                >
-                  Get directions
-                </a>
-              </li>
             </ul>
           </div>
 
@@ -86,12 +76,12 @@ export default function Footer() {
               </li>
               <li>
                 <a
-                  href="https://instagram.com/kdent_care"
+                  href="https://instagram.com/TK_dent_care"
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-3 transition-colors hover:text-white"
                 >
-                  <Instagram className="h-4 w-4 text-teal-3" /> @kdent_care
+                  <Instagram className="h-4 w-4 text-teal-3" /> @TK_dent_care
                 </a>
               </li>
               <li>
@@ -109,6 +99,17 @@ export default function Footer() {
         <div className="hairline-dark mt-14" />
         <div className="mt-6 flex flex-col items-start justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-[rgba(222,242,238,0.35)] md:flex-row md:items-center">
           <span>© {year} TK Dent Dental &amp; Aesthetic Care</span>
+          <span>
+            Website by{" "}
+            <a
+              href="https://synkew.com"
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-[rgba(222,242,238,0.6)] transition-colors hover:text-white"
+            >
+              Synkew
+            </a>
+          </span>
           <span>Dr. Tanveer Khokhar · PMDC 717175-03-D</span>
         </div>
       </div>

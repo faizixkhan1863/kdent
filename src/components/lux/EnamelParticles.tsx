@@ -48,8 +48,12 @@ export default function EnamelParticles({ className }: { className?: string }) {
     resize();
     const parts: Particle[] = Array.from({ length: 110 }, () => spawn(true));
 
-    let visible = true;
-    const io = new IntersectionObserver(([entry]) => (visible = entry.isIntersecting));
+    let visible = false;
+    const io = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      // Run the rAF loop only while on screen — hidden sections cost nothing.
+      if (visible && !raf) raf = requestAnimationFrame(tick);
+    });
     io.observe(canvas);
 
     let lastY = window.scrollY;
@@ -64,8 +68,11 @@ export default function EnamelParticles({ className }: { className?: string }) {
 
     let t = 0;
     const tick = () => {
+      if (!visible) {
+        raf = 0;
+        return;
+      }
       raf = requestAnimationFrame(tick);
-      if (!visible) return;
       t += 0.016;
       boost *= 0.94;
       ctx.clearRect(0, 0, w, h);
