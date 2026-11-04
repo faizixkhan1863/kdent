@@ -67,7 +67,7 @@ export default function Results() {
                   <span className="serif-accent"> premium.</span>&rdquo;
                 </p>
                 <p className="mt-4 text-sm leading-relaxed text-muted-ink">
-                  The words our patients use most. Every one of our 19 Google reviews rates K
+                  The words our patients use most. Every one of our 19 Google reviews rates TK
                   Dent a perfect five — for gentle hands, honest advice and results that last.
                 </p>
               </div>
