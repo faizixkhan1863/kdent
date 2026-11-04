@@ -70,7 +70,7 @@ export default function Book() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Booking failed. Please call 0332 5855589.");
+        throw new Error(data.error || "Booking failed. Please call 0312 3329479.");
       }
       setResult(data as BookingResult);
       setStatus("success");
@@ -107,7 +107,7 @@ export default function Book() {
 
             <div className="mt-10 space-y-4">
               <a
-                href="https://wa.me/923325855589"
+                href="https://wa.me/923123329479"
                 target="_blank"
                 rel="noreferrer"
                 className="group flex items-center gap-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4 transition-all duration-500 hover:border-teal-3/50 hover:bg-white/[0.06]"
@@ -119,11 +119,11 @@ export default function Book() {
                   <span className="block text-[10px] font-bold uppercase tracking-[0.28em] text-[rgba(222,242,238,0.45)]">
                     WhatsApp
                   </span>
-                  <span className="text-[15px] font-semibold text-white">0332 5855589</span>
+                  <span className="text-[15px] font-semibold text-white">0312 3329479</span>
                 </span>
               </a>
               <a
-                href="tel:+923325855589"
+                href="tel:+923123329479"
                 className="group flex items-center gap-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4 transition-all duration-500 hover:border-teal-3/50 hover:bg-white/[0.06]"
               >
                 <span className="grid h-11 w-11 place-items-center rounded-xl bg-teal/20 text-teal-3 transition-colors group-hover:bg-teal group-hover:text-white">
@@ -133,7 +133,7 @@ export default function Book() {
                   <span className="block text-[10px] font-bold uppercase tracking-[0.28em] text-[rgba(222,242,238,0.45)]">
                     Call the clinic
                   </span>
-                  <span className="text-[15px] font-semibold text-white">+92 332 5855589</span>
+                  <span className="text-[15px] font-semibold text-white">+92 312 3329479</span>
                 </span>
               </a>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -142,9 +142,9 @@ export default function Book() {
                     <MapPin className="h-5 w-5" />
                   </span>
                   <span className="text-[13px] leading-snug text-[rgba(222,242,238,0.75)]">
-                    Shop G-7, Farhan Heights,
+                    House 34-C, Akram Road,
                     <br />
-                    Jinnah Road, Bani Gala
+                    Bani Gala, Islamabad
                   </span>
                 </div>
                 <div className="flex items-start gap-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">

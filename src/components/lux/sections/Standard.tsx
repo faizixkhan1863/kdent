@@ -42,13 +42,13 @@ const MARQUEE = [
 
 export default function Standard() {
   return (
-    <section id="standard" className="sec-dark relative overflow-hidden" aria-label="The K Dent standard">
+    <section id="standard" className="sec-dark relative overflow-hidden" aria-label="The TK Dent standard">
       {/* particle transition */}
       <EnamelParticles className="pointer-events-none absolute inset-x-0 top-0 h-[46vh] w-full [mask-image:linear-gradient(to_bottom,black,transparent)]" />
 
       <div className="lux-container relative pb-20 pt-28 md:pb-28 md:pt-40">
         <Reveal>
-          <Eyebrow dark>The K Dent Standard</Eyebrow>
+          <Eyebrow dark>The TK Dent Standard</Eyebrow>
         </Reveal>
 
         <h2 className="display-lg mt-8 max-w-5xl text-white">

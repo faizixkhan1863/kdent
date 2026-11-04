@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { prefersReducedMotion } from "./lib/scroll";
 
-/** Porcelain curtain with K monogram — lifts once fonts are ready. */
+/** Porcelain curtain with TK monogram — lifts once fonts are ready. */
 export default function Preloader() {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -66,10 +66,10 @@ export default function Preloader() {
       ref={ref}
       className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-porcelain"
       role="status"
-      aria-label="Loading K Dent"
+      aria-label="Loading TK Dent"
     >
-      <div data-pre-fade className="font-display text-[5.5rem] leading-none text-ink md:text-[7rem]">
-        K
+      <div data-pre-fade className="font-display text-[4.75rem] leading-none text-ink md:text-[6rem]">
+        TK
       </div>
       <div
         data-pre-fade

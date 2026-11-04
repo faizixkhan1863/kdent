@@ -84,7 +84,7 @@ export default function Tour() {
       ref={sectionRef}
       id="clinic"
       className="relative overflow-hidden bg-porcelain-2"
-      aria-label="A tour of the K Dent clinic"
+      aria-label="A tour of the TK Dent clinic"
     >
       <div className="lux-container flex min-h-[100svh] flex-col justify-center py-24 lg:py-0">
         {/* progress bar */}
@@ -121,12 +121,12 @@ export default function Tour() {
                 <div className="lux-frame relative aspect-[16/10] overflow-hidden">
                   <Image
                     src={p.src}
-                    alt={`${p.title} at K Dent Dental & Aesthetic Care`}
+                    alt={`${p.title} at TK Dent Dental & Aesthetic Care`}
                     fill
                     sizes="(min-width: 1024px) 56vw, 100vw"
                     className="object-cover transition-transform duration-[1.4s] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.05]"
                   />
-                  <span className="kd-chip-light absolute left-6 top-6">K Dent · {p.num}</span>
+                  <span className="kd-chip-light absolute left-6 top-6">TK Dent · {p.num}</span>
                 </div>
                 <figcaption className="mt-6 flex items-baseline justify-between gap-8">
                   <div>
@@ -159,12 +159,12 @@ export default function Tour() {
                   <div className="lux-frame relative aspect-[16/10] overflow-hidden">
                     <Image
                       src={p.src}
-                      alt={`${p.title} at K Dent Dental & Aesthetic Care`}
+                      alt={`${p.title} at TK Dent Dental & Aesthetic Care`}
                       fill
                       sizes="100vw"
                       className="object-cover"
                     />
-                    <span className="kd-chip-light absolute left-5 top-5">K Dent · {p.num}</span>
+                    <span className="kd-chip-light absolute left-5 top-5">TK Dent · {p.num}</span>
                   </div>
                   <figcaption className="mt-4">
                     <h3 className="font-display text-2xl text-ink">

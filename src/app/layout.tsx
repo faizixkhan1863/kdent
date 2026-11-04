@@ -25,11 +25,11 @@ const siteUrl =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "K Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
+  title: "TK Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
   description:
-    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Tanveer Khokhar (PMDC 717175-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0332 5855589.",
+    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Tanveer Khokhar (PMDC 717175-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0312 3329479.",
   keywords: [
-    "K Dent",
+    "TK Dent",
     "dentist Bani Gala",
     "dental clinic Islamabad",
     "smile design Islamabad",
@@ -40,9 +40,9 @@ export const metadata: Metadata = {
     "aesthetic dentistry Islamabad",
     "luxury dental clinic Islamabad",
   ],
-  authors: [{ name: "K Dent Dental & Aesthetic Care" }],
+  authors: [{ name: "TK Dent Dental & Aesthetic Care" }],
   openGraph: {
-    title: "K Dent Dental & Aesthetic Care",
+    title: "TK Dent Dental & Aesthetic Care",
     description:
       "A boutique dental & aesthetic studio — smile design, painless RCTs, aligners & implants in Bani Gala, Islamabad. Rated 5.0★.",
     type: "website",
@@ -52,13 +52,13 @@ export const metadata: Metadata = {
         url: "/kdent/clinic-suite.jpg",
         width: 1344,
         height: 768,
-        alt: "K Dent Dental & Aesthetic Care — the treatment suite",
+        alt: "TK Dent Dental & Aesthetic Care — the treatment suite",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "K Dent Dental & Aesthetic Care",
+    title: "TK Dent Dental & Aesthetic Care",
     description: "Where modern dentistry meets trusted care. Bani Gala, Islamabad.",
     images: ["/kdent/clinic-suite.jpg"],
   },

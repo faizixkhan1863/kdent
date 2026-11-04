@@ -14,9 +14,9 @@ import Doctor from "./sections/Doctor";
 import Book from "./sections/Book";
 
 /**
- * K DENT — CLINICAL LUXE
+ * TK DENT — CLINICAL LUXE
  * A hyper-premium, cinematic scrollytelling experience for
- * K Dent Dental & Aesthetic Care, Bani Gala, Islamabad.
+ * TK Dent Dental & Aesthetic Care, Bani Gala, Islamabad.
  */
 export default function LuxDentSite() {
   return (
