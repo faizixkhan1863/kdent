@@ -29,7 +29,7 @@ export default function Doctor() {
             <div aria-hidden="true" className="absolute -left-5 -top-5 h-full w-full rounded-t-[10rem] rounded-b-[2rem] border border-teal/25" />
             <div className="lux-frame relative aspect-[3/4] overflow-hidden rounded-t-[10rem] rounded-b-[2rem]">
               <Image
-                src="/kdent/doctor-portrait-v2.jpg"
+                src="/kdent/doctor-portrait-v3.jpg"
                 alt="Dr. Tanveer Khokhar — Oral & Maxillofacial Surgeon at TK Dent"
                 fill
                 sizes="(min-width: 1024px) 40vw, 90vw"
