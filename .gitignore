@@ -40,3 +40,4 @@ skills/
 db/
 upload/
 agent-ctx/
+mini-services/**/*.log

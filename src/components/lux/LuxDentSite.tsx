@@ -12,6 +12,7 @@ import Services from "./sections/Services";
 import Results from "./sections/Results";
 import Doctor from "./sections/Doctor";
 import Book from "./sections/Book";
+import VoiceAgent from "./voice/VoiceAgent";
 
 /**
  * TK DENT — CLINICAL LUXE
@@ -37,6 +38,7 @@ export default function LuxDentSite() {
         </main>
         <Footer />
       </div>
+      <VoiceAgent />
     </SmoothScroll>
   );
 }

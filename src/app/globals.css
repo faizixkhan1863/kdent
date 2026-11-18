@@ -713,3 +713,37 @@ html.lenis body {
     opacity: 0.55;
   }
 }
+
+/* ---- voice agent (Sana) ---- */
+@keyframes va-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(14, 143, 132, 0.40); }
+  100% { box-shadow: 0 0 0 20px rgba(14, 143, 132, 0); }
+}
+.va-orb {
+  animation: va-pulse 2.4s ease-out infinite;
+}
+@keyframes va-bar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.va-bar-fallback {
+  animation: va-bar 0.9s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+.va-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(14, 143, 132, 0.35) transparent;
+}
+.va-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.va-scroll::-webkit-scrollbar-thumb {
+  background: rgba(14, 143, 132, 0.35);
+  border-radius: 999px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .va-orb,
+  .va-bar-fallback {
+    animation: none !important;
+  }
+}
