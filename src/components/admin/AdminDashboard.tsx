@@ -70,7 +70,7 @@ type TypeFilter = "sab" | AppointmentType;
 const PIN_STORAGE_KEY = "tkdent-admin-pin";
 const AUTO_REFRESH_MS = 15_000;
 
-const URDU_DAYS: string[] = ["itwar", "peer", "mangal", "budh", "jume raat", "juma", "hafta"];
+const FULL_DAYS: string[] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const EN_DAYS_SHORT: string[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS_SHORT: string[] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -84,7 +84,7 @@ function formatKarachiDate(now: Date): string {
   }).formatToParts(now);
   const lookup = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? "";
   const weekdayIndex = EN_DAYS_SHORT.indexOf(lookup("weekday"));
-  return `${URDU_DAYS[weekdayIndex >= 0 ? weekdayIndex : 0]}, ${lookup("day")} ${lookup("month")} ${lookup("year")}`;
+  return `${FULL_DAYS[weekdayIndex >= 0 ? weekdayIndex : 0]}, ${lookup("day")} ${lookup("month")} ${lookup("year")}`;
 }
 
 function formatSlotTime12h(hhmm: string): string {
@@ -109,18 +109,18 @@ function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
   const diffMinutes = Math.max(0, Math.floor((Date.now() - then) / 60_000));
-  if (diffMinutes < 1) return "abhi";
-  if (diffMinutes < 60) return `${diffMinutes} min pehle`;
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes} min ago`;
   const hours = Math.floor(diffMinutes / 60);
-  if (hours < 24) return `${hours} ghantay pehle`;
-  return `${Math.floor(hours / 24)} din pehle`;
+  if (hours < 24) return `${hours} hrs ago`;
+  return `${Math.floor(hours / 24)} days ago`;
 }
 
 function waHrefFor(appt: Appointment): string | null {
   const digits = appt.phone.replace(/\D/g, "");
   if (digits.length === 0) return null;
   const normalized = digits.startsWith("0") ? `92${digits.slice(1)}` : digits;
-  const message = `Assalam-o-Alaikum ${appt.name}, TK Dent se aapke ${appt.service} appointment (${formatApptDate(appt.date)}, ${formatSlotTime12h(appt.timeSlot)}) ke bare mein rabta hai.`;
+  const message = `Hello ${appt.name}, this is TK Dent Dental & Aesthetic Care regarding your ${appt.service} appointment on ${formatApptDate(appt.date)} at ${formatSlotTime12h(appt.timeSlot)}.`;
   return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
 }
 
@@ -281,7 +281,7 @@ function AppointmentRow({ appt, isToday, busy, onStatus }: {
             <span className="font-bold text-ink">{appt.name}</span>
             <TypeBadge type={appt.type} />
             {isToday ? (
-              <span className="rounded-full bg-ink-2 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-mint-glow">Aaj</span>
+              <span className="rounded-full bg-ink-2 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-mint-glow">Today</span>
             ) : null}
           </div>
           {waLink ? (
@@ -323,15 +323,15 @@ function AppointmentRow({ appt, isToday, busy, onStatus }: {
         </span>
         <span className="text-xs text-muted-ink">{relativeTime(appt.createdAt)}</span>
         {canConfirm || canComplete || canCancel ? (
-          <div className="ml-auto flex items-center gap-2" aria-label={`${appt.name} ke liye status actions`}>
+          <div className="ml-auto flex items-center gap-2" aria-label={`${appt.name} — status actions`}>
             {canConfirm ? (
-              <IconButton label="Confirm karein" icon={Check} tone="confirm" disabled={busy} onClick={() => onStatus(appt, "confirmed")} />
+              <IconButton label="Confirm appointment" icon={Check} tone="confirm" disabled={busy} onClick={() => onStatus(appt, "confirmed")} />
             ) : null}
             {canComplete ? (
-              <IconButton label="Complete karein" icon={CheckCheck} tone="complete" disabled={busy} onClick={() => onStatus(appt, "completed")} />
+              <IconButton label="Mark as completed" icon={CheckCheck} tone="complete" disabled={busy} onClick={() => onStatus(appt, "completed")} />
             ) : null}
             {canCancel ? (
-              <IconButton label="Cancel karein" icon={X} tone="cancel" disabled={busy} onClick={() => onStatus(appt, "cancelled")} />
+              <IconButton label="Cancel appointment" icon={X} tone="cancel" disabled={busy} onClick={() => onStatus(appt, "cancelled")} />
             ) : null}
           </div>
         ) : null}
@@ -393,7 +393,7 @@ export default function AdminDashboard() {
         setAppointments([]);
         setStats(null);
         setPinDefault(false);
-        setGateError("Session expire ho gayi — dobara PIN enter karein.");
+        setGateError("Session expired — please enter the PIN again.");
         setPhase("gate");
         return;
       }
@@ -404,7 +404,7 @@ export default function AdminDashboard() {
       setStats(data.stats ?? null);
       setPinDefault(Boolean(data.pinDefault));
     } catch {
-      if (!silent) setError("Data load nahi hua — dobara koshish karein.");
+      if (!silent) setError("Could not load data — please try again.");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -422,7 +422,7 @@ export default function AdminDashboard() {
       setSlots(Array.isArray(data.slots) ? data.slots : []);
       setSlotsError(null);
     } catch {
-      setSlotsError("Slot board load nahi hua.");
+      setSlotsError("Slot board could not load.");
     } finally {
       setSlotsLoading(false);
     }
@@ -436,7 +436,7 @@ export default function AdminDashboard() {
       if (res.status === 401) {
         window.localStorage.removeItem(PIN_STORAGE_KEY);
         setPin(null);
-        setGateError(fromStorage ? "Saved PIN ab valid nahi — dobara enter karein." : "PIN ghalat hai");
+        setGateError(fromStorage ? "Saved PIN is no longer valid — please enter it again." : "Incorrect PIN");
         setShake(true);
         setPhase("gate");
         return false;
@@ -455,7 +455,7 @@ export default function AdminDashboard() {
       setPhase("ready");
       return true;
     } catch {
-      setGateError("Server se rabta nahi ban raha — thodi dair baad koshish karein.");
+      setGateError("Cannot reach the server — please try again in a moment.");
       setPhase("gate");
       return false;
     } finally {
@@ -512,7 +512,7 @@ export default function AdminDashboard() {
     event.preventDefault();
     const candidate = pinInput.trim();
     if (!candidate) {
-      setGateError("Pehle PIN likhein.");
+      setGateError("Please enter the PIN first.");
       setShake(true);
       return;
     }
@@ -537,7 +537,7 @@ export default function AdminDashboard() {
   }, []);
 
   const updateStatus = async (appt: Appointment, next: AppointmentStatus) => {
-    if (next === "cancelled" && !window.confirm(`${appt.name} ka appointment cancel karein?`)) return;
+    if (next === "cancelled" && !window.confirm(`Cancel ${appt.name}'s appointment?`)) return;
     const currentPin = pinRef.current;
     if (!currentPin || updatingId) return;
     const previous = appointments;
@@ -553,7 +553,7 @@ export default function AdminDashboard() {
       if (res.status === 401) {
         window.localStorage.removeItem(PIN_STORAGE_KEY);
         setPin(null);
-        setGateError("Session expire ho gayi — dobara PIN enter karein.");
+        setGateError("Session expired — please enter the PIN again.");
         setPhase("gate");
         return;
       }
@@ -562,7 +562,7 @@ export default function AdminDashboard() {
       void loadAvailability(slotDateRef.current, true); // slot board follows PATCH actions
     } catch {
       setAppointments(previous);
-      setError("Status update fail hua — dobara koshish karein.");
+      setError("Status update failed — please try again.");
     } finally {
       setUpdatingId(null);
     }
@@ -607,10 +607,10 @@ export default function AdminDashboard() {
   const bookedCount = slots ? slots.length - freeCount : 0;
 
   const statCards: { icon: LucideIcon; label: string; value: string; hint: string }[] = [
-    { icon: CalendarDays, label: "Aaj", value: String(stats?.today ?? 0), hint: "Aaj ke appointments" },
-    { icon: CalendarRange, label: "Is hafte", value: String(stats?.week ?? 0), hint: "Is hafte ke appointments" },
-    { icon: Hourglass, label: "Pending", value: String(stats?.pending ?? 0), hint: "Confirm ka intezar" },
-    { icon: Users, label: "Naye / Follow-up", value: `${stats?.newPatients ?? 0} / ${stats?.followups ?? 0}`, hint: "Naye mareez aur follow-up" },
+    { icon: CalendarDays, label: "Today", value: String(stats?.today ?? 0), hint: "Today's appointments" },
+    { icon: CalendarRange, label: "This week", value: String(stats?.week ?? 0), hint: "This week's appointments" },
+    { icon: Hourglass, label: "Pending", value: String(stats?.pending ?? 0), hint: "Awaiting confirmation" },
+    { icon: Users, label: "New / Follow-up", value: `${stats?.newPatients ?? 0} / ${stats?.followups ?? 0}`, hint: "New patients vs follow-ups" },
   ];
 
   /* ---- render: checking ---- */
@@ -620,7 +620,7 @@ export default function AdminDashboard() {
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="flex flex-col items-center gap-5" role="status" aria-live="polite">
           <div className="h-12 w-12 animate-spin rounded-full border-2 border-teal/20 border-t-teal" aria-hidden />
-          <p className="text-sm text-muted-ink">Dashboard check ho raha hai...</p>
+          <p className="text-sm text-muted-ink">Checking dashboard...</p>
         </div>
       </div>
     );
@@ -653,7 +653,7 @@ export default function AdminDashboard() {
             <Lock className="h-7 w-7" aria-hidden />
           </div>
           <h1 className="mt-5 text-center font-display text-3xl text-ink">Doctors Dashboard</h1>
-          <p className="mt-2 text-center text-sm text-muted-ink">Sirf clinic staff ke liye — PIN enter karein</p>
+          <p className="mt-2 text-center text-sm text-muted-ink">For clinic staff only — enter your PIN</p>
           <form className="mt-8 space-y-4" onSubmit={submitGate}>
             <div>
               <label htmlFor="admin-pin" className="mb-2 block text-[11px] font-bold uppercase tracking-[0.22em] text-ink-3">Admin PIN</label>
@@ -675,11 +675,11 @@ export default function AdminDashboard() {
             ) : null}
             <button type="submit" disabled={verifying || pinInput.trim().length === 0} className="btn-teal w-full disabled:cursor-not-allowed disabled:opacity-60">
               <RefreshCw className={`h-4 w-4 ${verifying ? "animate-spin" : ""}`} aria-hidden />
-              {verifying ? "Verify ho raha hai" : "Enter"}
+              {verifying ? "Verifying…" : "Enter"}
             </button>
           </form>
           <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-ink">
-            Voice agent aur website se aane wali appointments yahan appear hoti hain.
+            Appointments booked by the AI voice agent and the website appear here instantly.
           </p>
         </div>
       </div>
@@ -705,7 +705,7 @@ export default function AdminDashboard() {
             {pinDefault ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-700">
                 <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
-                Default PIN active — ADMIN_PIN env se change karein
+                Default PIN active — change it via the ADMIN_PIN environment variable
               </span>
             ) : null}
             <button
@@ -771,7 +771,7 @@ export default function AdminDashboard() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="font-display text-2xl text-ink">Appointments</h2>
                 <span className="inline-flex items-center gap-2 rounded-full border border-teal/15 bg-porcelain-2 px-3 py-1.5 text-[11px] font-semibold text-ink-3">
-                  {filtered.length} / {appointments.length} dikhaye gaye
+                  {filtered.length} / {appointments.length} shown
                 </span>
               </div>
 
@@ -781,7 +781,7 @@ export default function AdminDashboard() {
                   <input
                     id="admin-search" type="search" value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Naam ya phone search karein" aria-label="Naam ya phone se search"
+                    placeholder="Search by name or phone" aria-label="Search by name or phone"
                     className="h-10 w-full rounded-xl border border-teal/20 bg-white/90 pl-9 pr-3 text-sm text-ink placeholder:text-muted-ink/70 focus-visible:outline-2 focus-visible:outline-teal"
                   />
                 </div>
@@ -790,7 +790,7 @@ export default function AdminDashboard() {
                   onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
                   className={controlCls}
                 >
-                  <option value="sab">Status: Sab</option>
+                  <option value="sab">Status: All</option>
                   <option value="pending">Pending</option>
                   <option value="confirmed">Confirmed</option>
                   <option value="completed">Completed</option>
@@ -801,7 +801,7 @@ export default function AdminDashboard() {
                   onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
                   className={controlCls}
                 >
-                  <option value="sab">Type: Sab</option>
+                  <option value="sab">Type: All</option>
                   <option value="new">New</option>
                   <option value="followup">Follow-up</option>
                 </select>
@@ -810,7 +810,7 @@ export default function AdminDashboard() {
                   onChange={(event) => setServiceFilter(event.target.value)}
                   className={controlCls}
                 >
-                  <option value="sab">Service: Sab</option>
+                  <option value="sab">Service: All</option>
                   {services.map((service) => (
                     <option key={service} value={service}>{service}</option>
                   ))}
@@ -826,8 +826,8 @@ export default function AdminDashboard() {
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-mint text-teal-2">
                     <Sparkles className="h-6 w-6" aria-hidden />
                   </div>
-                  <p className="mt-4 font-display text-2xl text-ink">Koi appointment nahi mila</p>
-                  <p className="mt-1 text-sm text-muted-ink">Filters reset karein ya naye bookings ka intezar karein.</p>
+                  <p className="mt-4 font-display text-2xl text-ink">No appointments found</p>
+                  <p className="mt-1 text-sm text-muted-ink">Reset the filters, or wait for new bookings to arrive.</p>
                 </div>
               ) : (
                 <ul className="space-y-3" aria-label="Appointments list">
@@ -847,11 +847,11 @@ export default function AdminDashboard() {
             <h2 className="font-display text-2xl text-ink">Slot Board</h2>
             <input
               type="date" value={slotDate} onChange={(event) => setSlotDate(event.target.value)}
-              aria-label="Slot board ki date" className={controlCls}
+              aria-label="Slot board date" className={controlCls}
             />
           </div>
           <p className="mt-1 text-xs text-muted-ink">
-            {slotDate ? formatApptDate(slotDate) : "—"} · voice agent aur website ki bookings
+            {slotDate ? formatApptDate(slotDate) : "—"} · voice agent & website bookings
           </p>
 
           <div className="mt-4">
@@ -873,8 +873,8 @@ export default function AdminDashboard() {
             ) : slotClosed ? (
               <div className="rounded-2xl border border-teal/15 bg-porcelain-2 px-4 py-10 text-center">
                 <CalendarX className="mx-auto h-8 w-8 text-teal-2" aria-hidden />
-                <p className="mt-3 font-semibold text-ink">Clinic closed (Itwar)</p>
-                <p className="mt-1 text-xs text-muted-ink">Itwar ko sirf appointment-based visits hoti hain.</p>
+                <p className="mt-3 font-semibold text-ink">Clinic closed (Sunday)</p>
+                <p className="mt-1 text-xs text-muted-ink">Open for appointment-based visits only.</p>
               </div>
             ) : slots && slots.length > 0 ? (
               <>
@@ -890,7 +890,7 @@ export default function AdminDashboard() {
               </>
             ) : (
               <div className="rounded-2xl border border-dashed border-teal/25 bg-porcelain-2 px-4 py-8 text-center text-sm text-muted-ink">
-                Is date ke liye slots available nahi hain.
+                No slots available for this date.
               </div>
             )}
           </div>

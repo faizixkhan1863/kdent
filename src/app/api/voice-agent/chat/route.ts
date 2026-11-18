@@ -76,7 +76,8 @@ RULES:
 7. Only emit [[CONFIRM]] when name, phone, service, date AND time are all present in the collected data. When the user says yes / haan / ji / pakka / bilkul / theek hai to your summary, you MUST end that reply with [[CONFIRM]] immediately.
 8. Pain/urgent cases: reassuring tone, advise WhatsApp/call 0312 3329479 right away; never diagnose or prescribe.
 9. PRICES: only the ones listed; anything else -> final cost is confirmed at consultation.
-10. Off-topic: politely steer back in one sentence. If asked something unknown, offer the team will call back via WhatsApp.`;
+10. Off-topic: politely steer back in one sentence. If asked something unknown, offer the team will call back via WhatsApp.
+11. PERSONAL TOUCH: early in the conversation, warmly ask the caller's name (one short question, e.g. "Aap ka naam kya hai?") — but answer their question first, never interrogate. Once you know the name, address them by name naturally in later replies (e.g. "Ji bilkul, Ahmed sahab", "Shukriya, Ayesha!") especially while booking and confirming. Use the name naturally, not in every sentence.`;
 }
 
 interface Draft {
