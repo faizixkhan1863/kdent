@@ -19,6 +19,8 @@ interface QueueItem {
   emotion: Emotion;
 }
 
+const EL_AGENT_ID = "agent_7801m7qwj5qke8jr2vfnd8svng6x"; // Sana — ElevenLabs ConvAI (public agent)
+
 const GREETING =
   "[warm] السلام علیکم! میں ثنا ہوں، ٹی کے ڈینٹ کی وائس اسسٹنٹ۔ آپ آواز سے یا لکھ کر ٹریٹمنٹس، اوقات یا اپوائنٹمنٹ کے بارے میں پوچھ سکتے ہیں۔";
 const WHATSAPP_URL =
@@ -26,6 +28,8 @@ const WHATSAPP_URL =
   encodeURIComponent("Assalam o Alaikum! Main appointment book karna chah raha/chah rahi hoon.");
 const MIC_DENIED =
   "Mic ki permission nahi mili — aap text se bhi pooch saktay hain.";
+const EL_FAILED_HINT =
+  "Premium voice busy hai — offline mode chal raha hai.";
 
 const EMOTION_RE = /^\s*\[(warm|reassuring|excited|neutral|sorry)\]/i;
 const EMO_LIST: Emotion[] = ["warm", "reassuring", "excited", "neutral", "sorry"];
@@ -51,6 +55,13 @@ interface SRInstance {
   abort(): void;
 }
 type SRCtor = new () => SRInstance;
+
+interface ElConversation {
+  endSession(): Promise<void>;
+  sendUserMessage(text: string): void;
+  getInputVolume(): number;
+  getOutputVolume(): number;
+}
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
@@ -120,6 +131,7 @@ function localBrain(question: string): string {
       : "[warm] Dr. Tanveer Khokhar is our senior oral and maxillofacial surgeon — FCPS qualified and C-Endo certified. He personally plans every case.";
   }
   if (has("book", "appointment", "reserve", "visit", "اپوائنٹ", "بک", "وقت لگوانا")) {
+    setBookFlagExternal();
     return ur
       ? "[excited] بہت خوب! اپوائنٹمنٹ کے لیے WhatsApp کریں 0312 3329479 پر، یا ویب سائٹ کا Book بٹن استعمال کریں۔"
       : "[excited] Wonderful! To book, WhatsApp us on 0312 3329479 or use the Book button on this page.";
@@ -169,6 +181,12 @@ function localBrain(question: string): string {
     : "[sorry] That one needs our full assistant online. Please WhatsApp us on 0312 3329479 and the team will reply quickly.";
 }
 
+/** module-level hook so localBrain can surface booking intent */
+let bookFlagSetter: (() => void) | null = null;
+function setBookFlagExternal(): void {
+  bookFlagSetter?.();
+}
+
 async function fetchBlob(text: string, lang: Lang, emotion: Emotion): Promise<Blob> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
@@ -203,6 +221,7 @@ export default function VoiceAgent() {
   const [micHint, setMicHint] = useState("");
   const [voiceInputOk, setVoiceInputOk] = useState(true);
   const [bookHint, setBookHint] = useState(false);
+  const [premiumMode, setPremiumMode] = useState<"off" | "voice" | "text">("off");
 
   const historyRef = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const runIdRef = useRef(0);
@@ -212,29 +231,127 @@ export default function VoiceAgent() {
   const ctxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
   const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
-  const greetedRef = useRef(false);
   const stateRef = useRef<AgentState>("idle");
   const logRef = useRef<HTMLDivElement | null>(null);
   const thinkingRef = useRef(false);
+  const elConvRef = useRef<ElConversation | null>(null);
+  const elTextOnlyRef = useRef(false);
+  const premiumFailedRef = useRef(false);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  /* Pre-warm the TTS service cache with the greeting's first line
-     so the first spoken reply feels instant when the orb is opened. */
   useEffect(() => {
-    const { items, plain } = parseReply(GREETING);
-    if (items[0]) {
-      fetchBlob(items[0].text, detectLang(plain), items[0].emotion).catch(() => {});
-    }
+    bookFlagSetter = () => setBookHint(true);
+    return () => {
+      bookFlagSetter = null;
+    };
   }, []);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [turns, interim, caption]);
 
-  /* ---------- speech pipeline ---------- */
+  /* ---------- ElevenLabs premium session ---------- */
+
+  const stopVisual = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    ctxRef.current?.close().catch(() => {});
+    ctxRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    barsRef.current.forEach((b) => {
+      if (b) b.style.transform = "scaleY(0.3)";
+    });
+  }, []);
+
+  /** rAF loop driving the waveform from the ElevenLabs session volumes */
+  const startElVisual = useCallback(() => {
+    const loop = () => {
+      const conv = elConvRef.current;
+      if (!conv) return;
+      const vol = stateRef.current === "speaking" ? conv.getOutputVolume() : conv.getInputVolume();
+      barsRef.current.forEach((b, i) => {
+        if (!b) return;
+        const centerBoost = 1 - Math.abs(i - 2) * 0.18;
+        const v = Math.min(1, Math.max(0.05, vol * 2.4 * centerBoost));
+        b.style.transform = `scaleY(${(0.22 + v * 1.6).toFixed(2)})`;
+      });
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    loop();
+  }, []);
+
+  const endElSession = useCallback(async () => {
+    const conv = elConvRef.current;
+    elConvRef.current = null;
+    elTextOnlyRef.current = false;
+    setPremiumMode("off");
+    if (conv) {
+      try {
+        await conv.endSession();
+      } catch {}
+    }
+  }, []);
+
+  const startElVoice = useCallback(async (): Promise<boolean> => {
+    if (premiumFailedRef.current) return false;
+    try {
+      setState("thinking");
+      const { Conversation } = await import("@elevenlabs/client");
+      const conv = (await Conversation.startSession({
+        agentId: EL_AGENT_ID,
+        onMessage: (msg: { source: "user" | "ai"; message?: string }) => {
+          const text = (msg.message ?? "").trim();
+          if (!text) return;
+          setTurns((t) => {
+            const last = t[t.length - 1];
+            if (last && last.who === (msg.source === "ai" ? "sana" : "you") && last.text === text) return t;
+            return [...t, { who: msg.source === "ai" ? "sana" : "you", text }];
+          });
+          if (msg.source === "ai" && elTextOnlyRef.current) {
+            // text-only session: speak the reply through our TTS route
+            const { items, plain } = parseReply(text);
+            const lang = detectLang(plain);
+            void runQueue(items, lang);
+          }
+        },
+        onModeChange: (prop: { mode: "speaking" | "listening" }) => {
+          if (!elConvRef.current) return;
+          setState(prop.mode === "speaking" ? "speaking" : "listening");
+          if (prop.mode === "listening") setCaption("");
+        },
+        onStatusChange: (prop: { status: "connected" | "disconnected" | "connecting" | "disconnecting" }) => {
+          if (prop.status === "disconnected" && elConvRef.current) {
+            void endElSession();
+            setState("idle");
+            stopVisual();
+          }
+        },
+        onError: () => {
+          // quota exhausted / network issue -> mark premium as failed for this page view
+          premiumFailedRef.current = true;
+          void endElSession();
+          stopVisual();
+          setState("idle");
+          setMicHint(EL_FAILED_HINT);
+        },
+      })) as unknown as ElConversation;
+
+      elConvRef.current = conv;
+      elTextOnlyRef.current = false;
+      setPremiumMode("voice");
+      setMicHint("");
+      setState("listening");
+      startElVisual();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [endElSession, startElVisual, stopVisual]);
+
+  /* ---------- legacy pipeline (brain route + TTS route) ---------- */
 
   const stopAll = useCallback(() => {
     runIdRef.current += 1;
@@ -337,7 +454,7 @@ export default function VoiceAgent() {
       }
 
       if (runId === runIdRef.current) {
-        setState("idle");
+        setState(elConvRef.current ? "listening" : "idle");
         setCaption("");
       }
     },
@@ -370,18 +487,11 @@ export default function VoiceAgent() {
     ].slice(-12);
   }, []);
 
-  const sendMessage = useCallback(
-    async (raw: string) => {
-      const text = raw.trim();
-      if (!text || thinkingRef.current) return;
-      stopAll();
-      setInterim("");
-      setCaption("");
+  const legacySend = useCallback(
+    async (text: string) => {
       thinkingRef.current = true;
       setState("thinking");
-      setBookHint(false);
       pushUserTurn(text);
-
       try {
         const res = await fetch("/api/voice-agent/chat", {
           method: "POST",
@@ -399,21 +509,54 @@ export default function VoiceAgent() {
         thinkingRef.current = false;
       }
     },
-    [pushUserTurn, speakReply, stopAll],
+    [pushUserTurn, speakReply],
   );
 
-  /* ---------- mic + visualizer ---------- */
+  const sendMessage = useCallback(
+    async (raw: string) => {
+      const text = raw.trim();
+      if (!text || thinkingRef.current) return;
+      stopAll();
+      setInterim("");
+      setCaption("");
+      setBookHint(false);
 
-  const stopVisual = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    ctxRef.current?.close().catch(() => {});
-    ctxRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    barsRef.current.forEach((b) => {
-      if (b) b.style.transform = "scaleY(0.3)";
-    });
-  }, []);
+      // 1) premium session already live? just forward the text
+      if (elConvRef.current) {
+        setState("thinking");
+        pushUserTurn(text);
+        try {
+          elConvRef.current.sendUserMessage(text);
+          return;
+        } catch {
+          await endElSession();
+        }
+      }
+
+      // 2) try starting a premium session (voice first; legacy on failure)
+      if (!premiumFailedRef.current) {
+        setState("thinking");
+        const ok = await startElVoice();
+        if (ok && elConvRef.current) {
+          // the session plays the agent's Urdu greeting; forward the question after it
+          setTimeout(() => {
+            try {
+              elConvRef.current?.sendUserMessage(text);
+            } catch {}
+          }, 2200);
+          return;
+        }
+        await endElSession();
+      }
+
+      // 3) legacy pipeline (pushes its own user turn)
+      setMicHint(premiumFailedRef.current ? EL_FAILED_HINT : "");
+      void legacySend(text);
+    },
+    [endElSession, legacySend, pushUserTurn, startElVoice, stopAll],
+  );
+
+  /* ---------- mic + visualizer (legacy listening path) ---------- */
 
   const startVisual = useCallback(async () => {
     try {
@@ -460,9 +603,13 @@ export default function VoiceAgent() {
     ).SpeechRecognition ||
     (window as unknown as { webkitSpeechRecognition?: SRCtor }).webkitSpeechRecognition;
 
-    if (!Ctor) {
-      setVoiceInputOk(false);
-      setMicHint("Is browser mein voice input support nahi — text se poochein.");
+    if (premiumFailedRef.current || !Ctor) {
+      if (!Ctor) {
+        setVoiceInputOk(false);
+        setMicHint("Is browser mein voice input support nahi — text se poochein.");
+      } else {
+        setMicHint(EL_FAILED_HINT);
+      }
       return;
     }
 
@@ -471,82 +618,63 @@ export default function VoiceAgent() {
     setInterim("");
     setMicHint("");
     setState("listening");
-    void startVisual();
 
-    const rec = new Ctor();
-    rec.lang = inputLang === "ur" ? "ur-PK" : "en-US";
-    rec.interimResults = true;
-    rec.continuous = false;
-    rec.maxAlternatives = 1;
-    recRef.current = rec;
-
-    rec.onresult = (e: SRResultEvent) => {
-      let finalText = "";
-      let interimText = "";
-      for (let i = 0; i < e.results.length; i += 1) {
-        const r = e.results[i];
-        if (r.isFinal) finalText += r[0].transcript;
-        else interimText += r[0].transcript;
-      }
-      setInterim(interimText.trim());
-      const final = finalText.trim();
-      if (final) {
-        setInterim("");
+    void (async () => {
+      const ok = await startElVoice();
+      if (!ok) {
+        // mic may be denied or quota hit -> fall back to browser recognition + legacy pipeline
         stopVisual();
-        void sendMessage(final);
+        setState("idle");
+        if (premiumFailedRef.current) {
+          setMicHint(EL_FAILED_HINT);
+        } else {
+          setVoiceInputOk(false);
+          setMicHint(MIC_DENIED);
+        }
       }
-    };
-    rec.onerror = (e: SRErrorEvent) => {
-      stopVisual();
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        setVoiceInputOk(false);
-        setMicHint(MIC_DENIED);
-      }
-      if (stateRef.current === "listening") setState("idle");
-    };
-    rec.onend = () => {
-      stopVisual();
-      if (stateRef.current === "listening") setState("idle");
-    };
-    try {
-      rec.start();
-    } catch {
-      setState("idle");
-    }
-  }, [inputLang, sendMessage, startVisual, stopAll, stopVisual]);
+    })();
+  }, [startElVoice, stopAll, stopVisual]);
+
+  const endVoiceSession = useCallback(() => {
+    stopAll();
+    stopVisual();
+    void endElSession();
+    setState("idle");
+    setCaption("");
+  }, [endElSession, stopAll, stopVisual]);
 
   /* ---------- greeting + cleanup ---------- */
 
   const openPanel = useCallback(() => {
     setOpen(true);
-    if (!greetedRef.current) {
-      greetedRef.current = true;
-      setTimeout(() => speakReply(GREETING), 400);
-    }
-  }, [speakReply]);
+  }, []);
 
   const closePanel = useCallback(() => {
     stopAll();
     stopListening();
+    void endElSession();
     setOpen(false);
-  }, [stopAll, stopListening]);
+  }, [endElSession, stopAll, stopListening]);
 
   useEffect(() => {
     return () => {
       stopAll();
       stopVisual();
+      void endElSession();
     };
-  }, [stopAll, stopVisual]);
+  }, [endElSession, stopAll, stopVisual]);
 
   /* ---------- render ---------- */
 
   const statusText =
     state === "listening"
-      ? "Sun rahi hoon..."
+      ? premiumMode === "voice"
+        ? "Sun rahi hoon — boliye!"
+        : "Sun rahi hoon..."
       : state === "thinking"
         ? "Soch rahi hoon..."
         : state === "speaking"
-          ? "Jawab de rahi hoon — Stop se rokeyn"
+          ? "Jawab de rahi hoon — boliye to beech mein rok doongi"
           : "Boliye ya likhiye — jawab awaz mein milega";
 
   const orbStyle = { bottom: "calc(1.15rem + env(safe-area-inset-bottom))", right: "1.15rem" };
@@ -580,7 +708,7 @@ export default function VoiceAgent() {
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold leading-tight text-ink">Sana</span>
           <span className="block truncate text-[11px] leading-tight text-muted-ink">
-            TK Dent Voice Assistant
+            {premiumMode === "voice" ? "TK Dent Voice Assistant · Premium" : "TK Dent Voice Assistant"}
           </span>
         </span>
         <div
@@ -671,7 +799,7 @@ export default function VoiceAgent() {
       >
         {turns.length === 0 && interim === "" ? (
           <p className="py-2 text-center text-[11px] text-muted-ink">
-            Yahan baat cheet ka khulasa aayega.
+            Mic dabayen aur boliye — Sana khud salam karegi, ya sawal likhein.
           </p>
         ) : (
           turns.map((t, i) => (
@@ -707,13 +835,23 @@ export default function VoiceAgent() {
       <div className="flex items-center gap-2 px-3 py-3">
         <button
           type="button"
-          onClick={() => (state === "listening" ? stopListening() : startListening())}
-          disabled={!voiceInputOk || state === "thinking"}
-          aria-label={state === "listening" ? "Mic band karein" : "Mic se baat karein"}
-          aria-pressed={state === "listening"}
+          onClick={() => {
+            if (premiumMode === "voice") {
+              endVoiceSession();
+            } else {
+              startListening();
+            }
+          }}
+          disabled={state === "thinking"}
+          aria-label={premiumMode === "voice" ? "Voice chat band karein" : "Mic se baat karein"}
+          aria-pressed={premiumMode === "voice"}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal text-white shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <Mic className="h-5 w-5" aria-hidden="true" />
+          {premiumMode === "voice" ? (
+            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+          ) : (
+            <Mic className="h-5 w-5" aria-hidden="true" />
+          )}
         </button>
 
         <input
@@ -732,7 +870,7 @@ export default function VoiceAgent() {
           className="h-11 min-w-0 flex-1 rounded-full border border-teal/30 bg-white px-4 text-sm text-ink placeholder:text-muted-ink/60 focus:border-teal focus:outline-none focus:ring-2 focus:ring-teal/25 disabled:opacity-50"
         />
 
-        {state === "speaking" ? (
+        {state === "speaking" && premiumMode !== "voice" ? (
           <button
             type="button"
             onClick={() => {
