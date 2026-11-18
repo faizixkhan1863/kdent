@@ -1,0 +1,902 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+     4→import type { FormEvent } from "react";
+     5→import {
+     6→  AudioLines, Calendar, CalendarDays, CalendarRange, CalendarX, Check, CheckCheck, Clock, Globe,
+     7→  Hourglass, Lock, LogOut, Phone, RefreshCw, Search, ShieldCheck, Sparkles, Stethoscope, TriangleAlert, Users, X,
+     8→} from "lucide-react";
+     9→import type { LucideIcon } from "lucide-react";
+    10→
+    11→/* ------------------------------------------------------------------ */
+    12→/*  API contract types (GET/PATCH /api/admin/appointments,             */
+    13→/*  GET /api/voice-agent/availability)                                 */
+    14→/* ------------------------------------------------------------------ */
+    15→
+    16→type AppointmentStatus = "pending" | "confirmed" | "completed" | "cancelled";
+    17→type AppointmentType = "new" | "followup";
+    18→type AppointmentSource = "voice-agent" | "web" | "admin";
+    19→
+    20→interface Appointment {
+    21→  id: string;
+    22→  name: string;
+    23→  phone: string;
+    24→  service: string;
+    25→  type: AppointmentType;
+    26→  date: string; // YYYY-MM-DD
+    27→  timeSlot: string; // HH:MM (24h)
+    28→  notes: string;
+    29→  status: AppointmentStatus;
+    30→  source: AppointmentSource;
+    31→  createdAt: string;
+    32→}
+    33→
+    34→interface DashboardStats {
+    35→  today: number;
+    36→  week: number;
+    37→  pending: number;
+    38→  newPatients: number;
+    39→  followups: number;
+    40→}
+    41→
+    42→interface AppointmentsResponse {
+    43→  ok: boolean;
+    44→  pinDefault?: boolean;
+    45→  appointments?: Appointment[];
+    46→  stats?: DashboardStats;
+    47→}
+    48→
+    49→interface AvailabilitySlot {
+    50→  time: string;
+    51→  booked: boolean;
+    52→  appointment?: { name: string; service: string; type: AppointmentType };
+    53→}
+    54→
+    55→interface AvailabilityResponse {
+    56→  ok: boolean;
+    57→  date?: string;
+    58→  closed?: boolean;
+    59→  slots?: AvailabilitySlot[];
+    60→}
+    61→
+    62→type AuthPhase = "checking" | "gate" | "ready";
+    63→type StatusFilter = "sab" | AppointmentStatus;
+    64→type TypeFilter = "sab" | AppointmentType;
+    65→
+    66→/* ------------------------------------------------------------------ */
+    67→/*  Constants + helpers                                                */
+    68→/* ------------------------------------------------------------------ */
+    69→
+    70→const PIN_STORAGE_KEY = "tkdent-admin-pin";
+    71→const AUTO_REFRESH_MS = 15_000;
+    72→
+    73→const FULL_DAYS: string[] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    74→const EN_DAYS_SHORT: string[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    75→const MONTHS_SHORT: string[] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    76→
+    77→function karachiToday(): string {
+    78→  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    79→}
+    80→
+    81→function formatKarachiDate(now: Date): string {
+    82→  const parts = new Intl.DateTimeFormat("en-US", {
+    83→    timeZone: "Asia/Karachi", weekday: "short", day: "numeric", month: "long", year: "numeric",
+    84→  }).formatToParts(now);
+    85→  const lookup = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? "";
+    86→  const weekdayIndex = EN_DAYS_SHORT.indexOf(lookup("weekday"));
+    87→  return `${FULL_DAYS[weekdayIndex >= 0 ? weekdayIndex : 0]}, ${lookup("day")} ${lookup("month")} ${lookup("year")}`;
+    88→}
+    89→
+    90→function formatSlotTime12h(hhmm: string): string {
+    91→  const segments = hhmm.split(":");
+    92→  const hours = Number.parseInt(segments[0] ?? "", 10);
+    93→  if (Number.isNaN(hours)) return hhmm;
+    94→  const suffix = hours >= 12 ? "PM" : "AM";
+    95→  const hours12 = hours % 12 === 0 ? 12 : hours % 12;
+    96→  return `${hours12}:${segments[1] ?? "00"} ${suffix}`;
+    97→}
+    98→
+    99→function formatApptDate(isoDate: string): string {
+   100→  const segments = isoDate.split("-");
+   101→  const year = Number.parseInt(segments[0] ?? "", 10);
+   102→  const month = Number.parseInt(segments[1] ?? "", 10);
+   103→  const day = Number.parseInt(segments[2] ?? "", 10);
+   104→  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day) || month < 1 || month > 12) return isoDate;
+   105→  return `${day} ${MONTHS_SHORT[month - 1]} ${year}`;
+   106→}
+   107→
+   108→function relativeTime(iso: string): string {
+   109→  const then = new Date(iso).getTime();
+   110→  if (Number.isNaN(then)) return "";
+   111→  const diffMinutes = Math.max(0, Math.floor((Date.now() - then) / 60_000));
+   112→  if (diffMinutes < 1) return "just now";
+   113→  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+   114→  const hours = Math.floor(diffMinutes / 60);
+   115→  if (hours < 24) return `${hours} hrs ago`;
+   116→  return `${Math.floor(hours / 24)} days ago`;
+   117→}
+   118→
+   119→function waHrefFor(appt: Appointment): string | null {
+   120→  const digits = appt.phone.replace(/\D/g, "");
+   121→  if (digits.length === 0) return null;
+   122→  const normalized = digits.startsWith("0") ? `92${digits.slice(1)}` : digits;
+   123→  const message = `Hello ${appt.name}, this is TK Dent Dental & Aesthetic Care regarding your ${appt.service} appointment on ${formatApptDate(appt.date)} at ${formatSlotTime12h(appt.timeSlot)}.`;
+   124→  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+   125→}
+   126→
+   127→/* ------------------------------------------------------------------ */
+   128→/*  Small presentational pieces                                        */
+   129→/* ------------------------------------------------------------------ */
+   130→
+   131→const STATUS_META: Record<AppointmentStatus, { label: string; dot: string; pill: string }> = {
+   132→  pending: { label: "Pending", dot: "bg-amber-500", pill: "border-amber-200 bg-amber-50 text-amber-700" },
+   133→  confirmed: { label: "Confirmed", dot: "bg-teal", pill: "border-teal/25 bg-mint text-teal-2" },
+   134→  completed: { label: "Completed", dot: "bg-emerald-500", pill: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+   135→  cancelled: { label: "Cancelled", dot: "bg-rose-500", pill: "border-rose-200 bg-rose-50 text-rose-600" },
+   136→};
+   137→
+   138→const ICON_TONES = {
+   139→  confirm: "border-teal/30 bg-mint/70 text-teal-2 hover:bg-teal hover:text-white",
+   140→  complete: "border-teal/25 bg-white/80 text-ink-3 hover:bg-teal-2 hover:text-white",
+   141→  cancel: "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white",
+   142→} as const;
+   143→type IconTone = keyof typeof ICON_TONES;
+   144→
+   145→const badgeBase = "inline-flex items-center gap-1.5 rounded-full border border-teal/15 bg-porcelain-2 px-2.5 py-1 text-[10px] font-semibold tracking-[0.08em] text-ink-3";
+   146→const controlCls = "h-10 rounded-xl border border-teal/20 bg-white/90 px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-teal";
+   147→
+   148→function StatusPill({ status }: { status: AppointmentStatus }) {
+   149→  const meta = STATUS_META[status];
+   150→  return (
+   151→    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${meta.pill}`}>
+   152→      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden />
+   153→      {meta.label}
+   154→    </span>
+   155→  );
+   156→}
+   157→
+   158→function TypeBadge({ type }: { type: AppointmentType }) {
+   159→  return type === "new" ? (
+   160→    <span className="rounded-full bg-teal px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white">New</span>
+   161→  ) : (
+   162→    <span className="rounded-full border border-teal/40 bg-white/70 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-teal-2">Follow-up</span>
+   163→  );
+   164→}
+   165→
+   166→function SourceBadge({ source }: { source: AppointmentSource }) {
+   167→  if (source === "voice-agent") {
+   168→    return <span className={badgeBase}><AudioLines className="h-3 w-3 text-teal" aria-hidden />Voice AI</span>;
+   169→  }
+   170→  if (source === "web") {
+   171→    return <span className={badgeBase}><Globe className="h-3 w-3 text-teal-2" aria-hidden />Web</span>;
+   172→  }
+   173→  return <span className={badgeBase}><ShieldCheck className="h-3 w-3 text-teal-2" aria-hidden />Admin</span>;
+   174→}
+   175→
+   176→function StatCard({ icon: Icon, label, value, hint }: { icon: LucideIcon; label: string; value: string; hint: string }) {
+   177→  return (
+   178→    <div className="rounded-3xl border border-teal/15 bg-white/85 p-5 shadow-sm backdrop-blur transition duration-500 hover:-translate-y-0.5 hover:border-teal/30 hover:shadow-md md:p-6">
+   179→      <div className="flex items-center justify-between gap-3">
+   180→        <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-ink md:text-[11px]">{label}</span>
+   181→        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-mint text-teal-2">
+   182→          <Icon className="h-5 w-5" aria-hidden />
+   183→        </span>
+   184→      </div>
+   185→      <div className="mt-4 font-display text-3xl leading-none text-ink md:text-4xl">{value}</div>
+   186→      <div className="mt-2 text-xs text-muted-ink">{hint}</div>
+   187→    </div>
+   188→  );
+   189→}
+   190→
+   191→function IconButton({ label, icon: Icon, tone, disabled, onClick }: {
+   192→  label: string; icon: LucideIcon; tone: IconTone; disabled: boolean; onClick: () => void;
+   193→}) {
+   194→  return (
+   195→    <button
+   196→      type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick}
+   197→      className={`flex h-10 w-10 items-center justify-center rounded-full border transition duration-300 focus-visible:outline-2 focus-visible:outline-teal disabled:cursor-not-allowed disabled:opacity-40 ${ICON_TONES[tone]}`}
+   198→    >
+   199→      <Icon className="h-4 w-4" aria-hidden />
+   200→    </button>
+   201→  );
+   202→}
+   203→
+   204→function SlotChip({ slot }: { slot: AvailabilitySlot }) {
+   205→  const time12 = formatSlotTime12h(slot.time);
+   206→  if (!slot.booked) {
+   207→    return (
+   208→      <div className="flex min-h-[56px] flex-col items-center justify-center rounded-xl border border-teal/20 bg-mint/50 px-2 py-2 text-center">
+   209→        <span className="text-xs font-bold text-teal-2">{time12}</span>
+   210→        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-teal/70">Free</span>
+   211→      </div>
+   212→    );
+   213→  }
+   214→  const booked = slot.appointment;
+   215→  return (
+   216→    <div
+   217→      className="flex min-h-[56px] flex-col justify-center rounded-xl border border-ink-2 bg-ink-2 px-3 py-2 text-white"
+   218→      title={booked ? `${booked.name} — ${booked.service}` : "Booked"}
+   219→    >
+   220→      <span className="text-xs font-bold text-mint-glow">{time12}</span>
+   221→      <span className="truncate text-[11px] font-semibold">{booked?.name ?? "Booked"}</span>
+   222→      {booked?.service ? <span className="truncate text-[10px] text-white/55">{booked.service}</span> : null}
+   223→    </div>
+   224→  );
+   225→}
+   226→
+   227→function ListSkeleton() {
+   228→  return (
+   229→    <div className="space-y-3" aria-label="Appointments load ho rahi hain">
+   230→      {[0, 1, 2, 3].map((i) => (
+   231→        <div key={i} className="rounded-2xl border border-teal/10 bg-white/60 p-4 md:p-5" aria-hidden>
+   232→          <div className="animate-pulse space-y-3">
+   233→            <div className="h-4 w-1/3 rounded-full bg-porcelain-2" />
+   234→            <div className="h-3 w-1/4 rounded-full bg-porcelain-2" />
+   235→            <div className="h-3 w-2/3 rounded-full bg-porcelain-2" />
+   236→          </div>
+   237→        </div>
+   238→      ))}
+   239→    </div>
+   240→  );
+   241→}
+   242→
+   243→function StatsSkeleton() {
+   244→  return (
+   245→    <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6" aria-hidden>
+   246→      {[0, 1, 2, 3].map((i) => (
+   247→        <div key={i} className="h-[132px] animate-pulse rounded-3xl border border-teal/10 bg-white/60" />
+   248→      ))}
+   249→    </div>
+   250→  );
+   251→}
+   252→
+   253→function SlotsSkeleton() {
+   254→  return (
+   255→    <div className="grid grid-cols-2 gap-2" aria-hidden>
+   256→      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+   257→        <div key={i} className="h-14 animate-pulse rounded-xl border border-teal/10 bg-white/60" />
+   258→      ))}
+   259→    </div>
+   260→  );
+   261→}
+   262→
+   263→/* ------------------------------------------------------------------ */
+   264→/*  Appointment row                                                    */
+   265→/* ------------------------------------------------------------------ */
+   266→
+   267→function AppointmentRow({ appt, isToday, busy, onStatus }: {
+   268→  appt: Appointment; isToday: boolean; busy: boolean; onStatus: (appt: Appointment, next: AppointmentStatus) => void;
+   269→}) {
+   270→  const time12 = formatSlotTime12h(appt.timeSlot);
+   271→  const waLink = waHrefFor(appt);
+   272→  const canConfirm = appt.status === "pending";
+   273→  const canComplete = appt.status === "pending" || appt.status === "confirmed";
+   274→  const canCancel = appt.status === "pending" || appt.status === "confirmed";
+   275→
+   276→  return (
+   277→    <li className="rounded-2xl border border-teal/15 bg-white/85 p-4 shadow-sm backdrop-blur transition duration-500 hover:-translate-y-0.5 hover:border-teal/35 hover:shadow-md md:p-5">
+   278→      <div className="flex items-start justify-between gap-3">
+   279→        <div className="min-w-0">
+   280→          <div className="flex flex-wrap items-center gap-2">
+   281→            <span className="font-bold text-ink">{appt.name}</span>
+   282→            <TypeBadge type={appt.type} />
+   283→            {isToday ? (
+   284→              <span className="rounded-full bg-ink-2 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-mint-glow">Today</span>
+   285→            ) : null}
+   286→          </div>
+   287→          {waLink ? (
+   288→            <a
+   289→              href={waLink} target="_blank" rel="noreferrer"
+   290→              aria-label={`WhatsApp ${appt.name} — ${appt.phone}`}
+   291→              className="mt-1.5 inline-flex min-h-[40px] items-center gap-1.5 text-sm font-medium text-teal-2 underline-offset-4 transition hover:text-teal hover:underline"
+   292→            >
+   293→              <Phone className="h-3.5 w-3.5" aria-hidden />
+   294→              {appt.phone}
+   295→            </a>
+   296→          ) : (
+   297→            <span className="mt-1.5 inline-flex items-center gap-1.5 text-sm text-ink-3">
+   298→              <Phone className="h-3.5 w-3.5" aria-hidden />
+   299→              {appt.phone}
+   300→            </span>
+   301→          )}
+   302→          {appt.notes ? <p className="mt-1.5 text-xs leading-relaxed text-muted-ink">Note: {appt.notes}</p> : null}
+   303→        </div>
+   304→        <StatusPill status={appt.status} />
+   305→      </div>
+   306→
+   307→      <div className="mt-3 flex flex-wrap items-center gap-2">
+   308→        <span className="inline-flex items-center gap-1.5 rounded-full bg-mint px-3 py-1 text-xs font-semibold text-teal-2">
+   309→          <Stethoscope className="h-3.5 w-3.5" aria-hidden />
+   310→          {appt.service}
+   311→        </span>
+   312→        <SourceBadge source={appt.source} />
+   313→      </div>
+   314→
+   315→      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-teal/10 pt-3 text-sm text-ink-3">
+   316→        <span className="inline-flex items-center gap-1.5">
+   317→          <Calendar className="h-3.5 w-3.5 text-teal" aria-hidden />
+   318→          {formatApptDate(appt.date)}
+   319→        </span>
+   320→        <span className="inline-flex items-center gap-1.5">
+   321→          <Clock className="h-3.5 w-3.5 text-teal" aria-hidden />
+   322→          {time12}
+   323→        </span>
+   324→        <span className="text-xs text-muted-ink">{relativeTime(appt.createdAt)}</span>
+   325→        {canConfirm || canComplete || canCancel ? (
+   326→          <div className="ml-auto flex items-center gap-2" aria-label={`${appt.name} — status actions`}>
+   327→            {canConfirm ? (
+   328→              <IconButton label="Confirm appointment" icon={Check} tone="confirm" disabled={busy} onClick={() => onStatus(appt, "confirmed")} />
+   329→            ) : null}
+   330→            {canComplete ? (
+   331→              <IconButton label="Mark as completed" icon={CheckCheck} tone="complete" disabled={busy} onClick={() => onStatus(appt, "completed")} />
+   332→            ) : null}
+   333→            {canCancel ? (
+   334→              <IconButton label="Cancel appointment" icon={X} tone="cancel" disabled={busy} onClick={() => onStatus(appt, "cancelled")} />
+   335→            ) : null}
+   336→          </div>
+   337→        ) : null}
+   338→      </div>
+   339→    </li>
+   340→  );
+   341→}
+   342→
+   343→/* ------------------------------------------------------------------ */
+   344→/*  Dashboard                                                          */
+   345→/* ------------------------------------------------------------------ */
+   346→
+   347→export default function AdminDashboard() {
+   348→  const [phase, setPhase] = useState<AuthPhase>("checking");
+   349→  const [pin, setPin] = useState<string | null>(null);
+   350→  const [pinInput, setPinInput] = useState("");
+   351→  const [verifying, setVerifying] = useState(false);
+   352→  const [gateError, setGateError] = useState<string | null>(null);
+   353→  const [shake, setShake] = useState(false);
+   354→  const [pinDefault, setPinDefault] = useState(false);
+   355→
+   356→  const [appointments, setAppointments] = useState<Appointment[]>([]);
+   357→  const [stats, setStats] = useState<DashboardStats | null>(null);
+   358→  const [loading, setLoading] = useState(false);
+   359→  const [refreshing, setRefreshing] = useState(false);
+   360→  const [error, setError] = useState<string | null>(null);
+   361→  const [auto, setAuto] = useState(true);
+   362→
+   363→  const [statusFilter, setStatusFilter] = useState<StatusFilter>("sab");
+   364→  const [typeFilter, setTypeFilter] = useState<TypeFilter>("sab");
+   365→  const [serviceFilter, setServiceFilter] = useState("sab");
+   366→  const [query, setQuery] = useState("");
+   367→
+   368→  const [slotDate, setSlotDate] = useState("");
+   369→  const [slots, setSlots] = useState<AvailabilitySlot[] | null>(null);
+   370→  const [slotClosed, setSlotClosed] = useState(false);
+   371→  const [slotsLoading, setSlotsLoading] = useState(false);
+   372→  const [slotsError, setSlotsError] = useState<string | null>(null);
+   373→
+   374→  const [updatingId, setUpdatingId] = useState<string | null>(null);
+   375→
+   376→  const pinRef = useRef<string | null>(null);
+   377→  const slotDateRef = useRef("");
+   378→  const pinInputRef = useRef<HTMLInputElement | null>(null);
+   379→  pinRef.current = pin;
+   380→  slotDateRef.current = slotDate;
+   381→
+   382→  /* ---- data loaders ---- */
+   383→
+   384→  const loadAppointments = useCallback(async (candidatePin: string, silent = false) => {
+   385→    if (!candidatePin) return;
+   386→    if (!silent) setLoading(true);
+   387→    setError(null);
+   388→    try {
+   389→      const res = await fetch("/api/admin/appointments", { headers: { "x-admin-pin": candidatePin }, cache: "no-store" });
+   390→      if (res.status === 401) {
+   391→        window.localStorage.removeItem(PIN_STORAGE_KEY);
+   392→        setPin(null);
+   393→        setAppointments([]);
+   394→        setStats(null);
+   395→        setPinDefault(false);
+   396→        setGateError("Session expired — please enter the PIN again.");
+   397→        setPhase("gate");
+   398→        return;
+   399→      }
+   400→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   401→      const data = (await res.json()) as AppointmentsResponse;
+   402→      if (!data.ok || !Array.isArray(data.appointments)) throw new Error("Invalid payload");
+   403→      setAppointments(data.appointments);
+   404→      setStats(data.stats ?? null);
+   405→      setPinDefault(Boolean(data.pinDefault));
+   406→    } catch {
+   407→      if (!silent) setError("Could not load data — please try again.");
+   408→    } finally {
+   409→      if (!silent) setLoading(false);
+   410→    }
+   411→  }, []);
+   412→
+   413→  const loadAvailability = useCallback(async (date: string, silent = false) => {
+   414→    if (!date) return;
+   415→    if (!silent) setSlotsLoading(true);
+   416→    try {
+   417→      const res = await fetch(`/api/voice-agent/availability?date=${encodeURIComponent(date)}`, { cache: "no-store" });
+   418→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   419→      const data = (await res.json()) as AvailabilityResponse;
+   420→      if (!data.ok) throw new Error("Invalid payload");
+   421→      setSlotClosed(Boolean(data.closed));
+   422→      setSlots(Array.isArray(data.slots) ? data.slots : []);
+   423→      setSlotsError(null);
+   424→    } catch {
+   425→      setSlotsError("Slot board could not load.");
+   426→    } finally {
+   427→      setSlotsLoading(false);
+   428→    }
+   429→  }, []);
+   430→
+   431→  const verifyPin = useCallback(async (candidate: string, fromStorage: boolean): Promise<boolean> => {
+   432→    setVerifying(true);
+   433→    setGateError(null);
+   434→    try {
+   435→      const res = await fetch("/api/admin/appointments", { headers: { "x-admin-pin": candidate }, cache: "no-store" });
+   436→      if (res.status === 401) {
+   437→        window.localStorage.removeItem(PIN_STORAGE_KEY);
+   438→        setPin(null);
+   439→        setGateError(fromStorage ? "Saved PIN is no longer valid — please enter it again." : "Incorrect PIN");
+   440→        setShake(true);
+   441→        setPhase("gate");
+   442→        return false;
+   443→      }
+   444→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   445→      const data = (await res.json()) as AppointmentsResponse;
+   446→      if (!data.ok || !Array.isArray(data.appointments)) throw new Error("Invalid payload");
+   447→      window.localStorage.setItem(PIN_STORAGE_KEY, candidate);
+   448→      setPin(candidate);
+   449→      setAppointments(data.appointments);
+   450→      setStats(data.stats ?? null);
+   451→      setPinDefault(Boolean(data.pinDefault));
+   452→      setError(null);
+   453→      setLoading(false);
+   454→      setRefreshing(false);
+   455→      setPhase("ready");
+   456→      return true;
+   457→    } catch {
+   458→      setGateError("Cannot reach the server — please try again in a moment.");
+   459→      setPhase("gate");
+   460→      return false;
+   461→    } finally {
+   462→      setVerifying(false);
+   463→    }
+   464→  }, []);
+   465→
+   466→  const refreshAll = useCallback(async () => {
+   467→    const currentPin = pinRef.current;
+   468→    if (!currentPin) return;
+   469→    setRefreshing(true);
+   470→    await Promise.all([loadAppointments(currentPin, true), loadAvailability(slotDateRef.current, true)]);
+   471→    setRefreshing(false);
+   472→  }, [loadAppointments, loadAvailability]);
+   473→
+   474→  const retryLoad = useCallback(() => {
+   475→    const currentPin = pinRef.current;
+   476→    if (currentPin) void loadAppointments(currentPin, false);
+   477→  }, [loadAppointments]);
+   478→
+   479→  /* ---- lifecycle ---- */
+   480→
+   481→  useEffect(() => {
+   482→    setSlotDate(karachiToday());
+   483→    const saved = window.localStorage.getItem(PIN_STORAGE_KEY);
+   484→    if (!saved) {
+   485→      setPhase("gate");
+   486→      return;
+   487→    }
+   488→    setPin(saved);
+   489→    void verifyPin(saved, true);
+   490→  }, [verifyPin]);
+   491→
+   492→  useEffect(() => {
+   493→    if (phase === "gate") pinInputRef.current?.focus();
+   494→  }, [phase]);
+   495→
+   496→  useEffect(() => {
+   497→    if (phase !== "ready" || !auto) return;
+   498→    const id = window.setInterval(() => {
+   499→      void refreshAll();
+   500→    }, AUTO_REFRESH_MS);
+   501→    return () => window.clearInterval(id);
+   502→  }, [phase, auto, refreshAll]);
+   503→
+   504→  useEffect(() => {
+   505→    if (phase !== "ready" || !slotDate) return;
+   506→    void loadAvailability(slotDate);
+   507→  }, [phase, slotDate, loadAvailability]);
+   508→
+   509→  /* ---- actions ---- */
+   510→
+   511→  const submitGate = (event: FormEvent<HTMLFormElement>) => {
+   512→    event.preventDefault();
+   513→    const candidate = pinInput.trim();
+   514→    if (!candidate) {
+   515→      setGateError("Please enter the PIN first.");
+   516→      setShake(true);
+   517→      return;
+   518→    }
+   519→    void verifyPin(candidate, false).then((ok) => {
+   520→      if (ok) setPinInput("");
+   521→    });
+   522→  };
+   523→
+   524→  const logout = useCallback(() => {
+   525→    window.localStorage.removeItem(PIN_STORAGE_KEY);
+   526→    setPin(null);
+   527→    setPhase("gate");
+   528→    setPinDefault(false);
+   529→    setAppointments([]);
+   530→    setStats(null);
+   531→    setSlots(null);
+   532→    setSlotClosed(false);
+   533→    setSlotsError(null);
+   534→    setError(null);
+   535→    setGateError(null);
+   536→    setPinInput("");
+   537→  }, []);
+   538→
+   539→  const updateStatus = async (appt: Appointment, next: AppointmentStatus) => {
+   540→    if (next === "cancelled" && !window.confirm(`Cancel ${appt.name}'s appointment?`)) return;
+   541→    const currentPin = pinRef.current;
+   542→    if (!currentPin || updatingId) return;
+   543→    const previous = appointments;
+   544→    setAppointments((current) => current.map((item) => (item.id === appt.id ? { ...item, status: next } : item)));
+   545→    setUpdatingId(appt.id);
+   546→    setError(null);
+   547→    try {
+   548→      const res = await fetch("/api/admin/appointments", {
+   549→        method: "PATCH",
+   550→        headers: { "content-type": "application/json", "x-admin-pin": currentPin },
+   551→        body: JSON.stringify({ id: appt.id, status: next }),
+   552→      });
+   553→      if (res.status === 401) {
+   554→        window.localStorage.removeItem(PIN_STORAGE_KEY);
+   555→        setPin(null);
+   556→        setGateError("Session expired — please enter the PIN again.");
+   557→        setPhase("gate");
+   558→        return;
+   559→      }
+   560→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   561→      void loadAppointments(currentPin, true); // refresh stats quietly
+   562→      void loadAvailability(slotDateRef.current, true); // slot board follows PATCH actions
+   563→    } catch {
+   564→      setAppointments(previous);
+   565→      setError("Status update failed — please try again.");
+   566→    } finally {
+   567→      setUpdatingId(null);
+   568→    }
+   569→  };
+   570→
+   571→  /* ---- derived ---- */
+   572→
+   573→  const services = useMemo(() => {
+   574→    const unique = new Set<string>();
+   575→    for (const item of appointments) {
+   576→      if (item.service) unique.add(item.service);
+   577→    }
+   578→    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+   579→  }, [appointments]);
+   580→
+   581→  const activeServiceFilter = services.includes(serviceFilter) ? serviceFilter : "sab";
+   582→
+   583→  const filtered = useMemo(() => {
+   584→    const q = query.trim().toLowerCase();
+   585→    const qDigits = q.replace(/\D/g, "");
+   586→    const list = appointments.filter((item) => {
+   587→      if (statusFilter !== "sab" && item.status !== statusFilter) return false;
+   588→      if (typeFilter !== "sab" && item.type !== typeFilter) return false;
+   589→      if (activeServiceFilter !== "sab" && item.service !== activeServiceFilter) return false;
+   590→      if (q) {
+   591→        const nameHit = item.name.toLowerCase().includes(q);
+   592→        const phoneHit = qDigits.length > 0 && item.phone.replace(/\D/g, "").includes(qDigits);
+   593→        if (!nameHit && !phoneHit) return false;
+   594→      }
+   595→      return true;
+   596→    });
+   597→    return list.sort((a, b) => {
+   598→      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+   599→      if (a.timeSlot !== b.timeSlot) return a.timeSlot < b.timeSlot ? -1 : 1;
+   600→      return a.createdAt < b.createdAt ? -1 : 1;
+   601→    });
+   602→  }, [appointments, statusFilter, typeFilter, activeServiceFilter, query]);
+   603→
+   604→  const todayKey = karachiToday();
+   605→  const headerDate = formatKarachiDate(new Date());
+   606→  const freeCount = slots ? slots.filter((slot) => !slot.booked).length : 0;
+   607→  const bookedCount = slots ? slots.length - freeCount : 0;
+   608→
+   609→  const statCards: { icon: LucideIcon; label: string; value: string; hint: string }[] = [
+   610→    { icon: CalendarDays, label: "Today", value: String(stats?.today ?? 0), hint: "Today's appointments" },
+   611→    { icon: CalendarRange, label: "This week", value: String(stats?.week ?? 0), hint: "This week's appointments" },
+   612→    { icon: Hourglass, label: "Pending", value: String(stats?.pending ?? 0), hint: "Awaiting confirmation" },
+   613→    { icon: Users, label: "New / Follow-up", value: `${stats?.newPatients ?? 0} / ${stats?.followups ?? 0}`, hint: "New patients vs follow-ups" },
+   614→  ];
+   615→
+   616→  /* ---- render: checking ---- */
+   617→
+   618→  if (phase === "checking") {
+   619→    return (
+   620→      <div className="flex min-h-screen items-center justify-center px-4">
+   621→        <div className="flex flex-col items-center gap-5" role="status" aria-live="polite">
+   622→          <div className="h-12 w-12 animate-spin rounded-full border-2 border-teal/20 border-t-teal" aria-hidden />
+   623→          <p className="text-sm text-muted-ink">Checking dashboard...</p>
+   624→        </div>
+   625→      </div>
+   626→    );
+   627→  }
+   628→
+   629→  /* ---- render: PIN gate ---- */
+   630→
+   631→  if (phase === "gate") {
+   632→    return (
+   633→      <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
+   634→        <style>{`
+   635→          @keyframes admin-shake {
+   636→            10%, 90% { transform: translateX(-1px); }
+   637→            20%, 80% { transform: translateX(2px); }
+   638→            30%, 50%, 70% { transform: translateX(-4px); }
+   639→            40%, 60% { transform: translateX(4px); }
+   640→          }
+   641→          .admin-shake { animation: admin-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+   642→        `}</style>
+   643→        <div aria-hidden className="pointer-events-none absolute inset-0">
+   644→          <div className="absolute -top-32 right-[-8%] h-[420px] w-[420px] rounded-full bg-mint-glow/30 blur-3xl" />
+   645→          <div className="absolute bottom-[-20%] left-[-8%] h-[400px] w-[400px] rounded-full bg-teal/10 blur-3xl" />
+   646→        </div>
+   647→        <div
+   648→          className={`w-full max-w-md rounded-3xl border border-teal/15 bg-white/90 p-8 shadow-xl shadow-teal/10 backdrop-blur md:p-10 ${shake ? "admin-shake" : ""}`}
+   649→          onAnimationEnd={() => setShake(false)}
+   650→        >
+   651→          <div className="text-center font-display text-2xl leading-none text-ink">TK<span className="text-teal-3">·</span>Dent</div>
+   652→          <div className="mx-auto mt-6 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-teal-2 to-teal-3 text-white shadow-lg shadow-teal/30">
+   653→            <Lock className="h-7 w-7" aria-hidden />
+   654→          </div>
+   655→          <h1 className="mt-5 text-center font-display text-3xl text-ink">Doctors Dashboard</h1>
+   656→          <p className="mt-2 text-center text-sm text-muted-ink">For clinic staff only — enter your PIN</p>
+   657→          <form className="mt-8 space-y-4" onSubmit={submitGate}>
+   658→            <div>
+   659→              <label htmlFor="admin-pin" className="mb-2 block text-[11px] font-bold uppercase tracking-[0.22em] text-ink-3">Admin PIN</label>
+   660→              <input
+   661→                ref={pinInputRef}
+   662→                id="admin-pin" type="password" inputMode="numeric" autoComplete="current-password"
+   663→                value={pinInput}
+   664→                onChange={(event) => {
+   665→                  setPinInput(event.target.value);
+   666→                  if (gateError) setGateError(null);
+   667→                }}
+   668→                placeholder="••••" aria-invalid={Boolean(gateError)}
+   669→                aria-describedby={gateError ? "admin-pin-error" : undefined}
+   670→                className="h-12 w-full rounded-2xl border border-teal/20 bg-white/95 px-4 text-center text-lg font-semibold tracking-[0.5em] text-ink placeholder:tracking-[0.3em] placeholder:text-muted-ink/50 focus-visible:outline-2 focus-visible:outline-teal"
+   671→              />
+   672→            </div>
+   673→            {gateError ? (
+   674→              <p id="admin-pin-error" role="alert" className="text-center text-sm font-medium text-rose-600">{gateError}</p>
+   675→            ) : null}
+   676→            <button type="submit" disabled={verifying || pinInput.trim().length === 0} className="btn-teal w-full disabled:cursor-not-allowed disabled:opacity-60">
+   677→              <RefreshCw className={`h-4 w-4 ${verifying ? "animate-spin" : ""}`} aria-hidden />
+   678→              {verifying ? "Verifying…" : "Enter"}
+   679→            </button>
+   680→          </form>
+   681→          <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-ink">
+   682→            Appointments booked by the AI voice agent and the website appear here instantly.
+   683→          </p>
+   684→        </div>
+   685→      </div>
+   686→    );
+   687→  }
+   688→
+   689→  /* ---- render: dashboard ---- */
+   690→
+   691→  return (
+   692→    <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-10">
+   693→      {/* top bar */}
+   694→      <header className="rounded-3xl border border-teal/15 bg-white/85 p-5 shadow-sm backdrop-blur md:p-6">
+   695→        <div className="flex flex-wrap items-center justify-between gap-4">
+   696→          <div className="flex items-center gap-4 md:gap-5">
+   697→            <div className="font-display text-3xl leading-none text-ink md:text-4xl">TK<span className="text-teal-3">·</span>Dent</div>
+   698→            <span className="hidden h-10 w-px bg-teal/20 sm:block" aria-hidden />
+   699→            <div>
+   700→              <div className="text-[11px] font-bold uppercase tracking-[0.3em] text-teal">Doctors Dashboard</div>
+   701→              <div className="mt-1 text-sm text-muted-ink">{headerDate} · Asia/Karachi</div>
+   702→            </div>
+   703→          </div>
+   704→          <div className="flex flex-wrap items-center gap-3">
+   705→            {pinDefault ? (
+   706→              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-700">
+   707→                <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+   708→                Default PIN active — change it via the ADMIN_PIN environment variable
+   709→              </span>
+   710→            ) : null}
+   711→            <button
+   712→              type="button" onClick={() => setAuto((value) => !value)} aria-pressed={auto} aria-label="Auto refresh on/off"
+   713→              className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-xs font-bold uppercase tracking-[0.14em] transition duration-300 focus-visible:outline-2 focus-visible:outline-teal ${
+   714→                auto ? "border-teal/30 bg-mint text-teal-2" : "border-ink/10 bg-white/70 text-muted-ink hover:border-teal/30"
+   715→              }`}
+   716→            >
+   717→              {auto ? (
+   718→                <span className="relative flex h-2 w-2" aria-hidden>
+   719→                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-3 opacity-60" />
+   720→                  <span className="relative inline-flex h-2 w-2 rounded-full bg-teal" />
+   721→                </span>
+   722→              ) : null}
+   723→              Auto
+   724→            </button>
+   725→            <button type="button" onClick={retryLoad} disabled={refreshing} className="btn-teal disabled:opacity-70">
+   726→              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} aria-hidden />
+   727→              Refresh
+   728→            </button>
+   729→            <button
+   730→              type="button" onClick={logout} aria-label="Logout" title="Logout"
+   731→              className="flex h-10 w-10 items-center justify-center rounded-full border border-ink/10 bg-white/70 text-ink-3 transition duration-300 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-2 focus-visible:outline-teal"
+   732→            >
+   733→              <LogOut className="h-4 w-4" aria-hidden />
+   734→            </button>
+   735→          </div>
+   736→        </div>
+   737→      </header>
+   738→
+   739→      {/* stats */}
+   740→      <section aria-label="Dashboard stats" className="mt-6">
+   741→        {loading && !stats ? (
+   742→          <StatsSkeleton />
+   743→        ) : (
+   744→          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
+   745→            {statCards.map((card) => (
+   746→              <StatCard key={card.label} icon={card.icon} label={card.label} value={card.value} hint={card.hint} />
+   747→            ))}
+   748→          </div>
+   749→        )}
+   750→      </section>
+   751→
+   752→      {/* global error strip */}
+   753→      {error ? (
+   754→        <div role="alert" className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-700">
+   755→          <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+   756→          <span className="flex-1">{error}</span>
+   757→          <button
+   758→            type="button" onClick={retryLoad}
+   759→            className="h-10 rounded-full border border-rose-300 bg-white px-5 text-xs font-bold uppercase tracking-[0.14em] text-rose-700 transition hover:bg-rose-100 focus-visible:outline-2 focus-visible:outline-teal"
+   760→          >
+   761→            Retry
+   762→          </button>
+   763→        </div>
+   764→      ) : null}
+   765→
+   766→      {/* list + slot board */}
+   767→      <div className="mt-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+   768→        <main>
+   769→          <section className="rounded-3xl border border-teal/15 bg-white/85 shadow-sm backdrop-blur">
+   770→            <div className="space-y-4 p-5 md:p-6">
+   771→              <div className="flex flex-wrap items-center justify-between gap-3">
+   772→                <h2 className="font-display text-2xl text-ink">Appointments</h2>
+   773→                <span className="inline-flex items-center gap-2 rounded-full border border-teal/15 bg-porcelain-2 px-3 py-1.5 text-[11px] font-semibold text-ink-3">
+   774→                  {filtered.length} / {appointments.length} shown
+   775→                </span>
+   776→              </div>
+   777→
+   778→              <div className="flex flex-wrap items-center gap-3">
+   779→                <div className="relative min-w-[200px] flex-1">
+   780→                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-ink" aria-hidden />
+   781→                  <input
+   782→                    id="admin-search" type="search" value={query}
+   783→                    onChange={(event) => setQuery(event.target.value)}
+   784→                    placeholder="Search by name or phone" aria-label="Search by name or phone"
+   785→                    className="h-10 w-full rounded-xl border border-teal/20 bg-white/90 pl-9 pr-3 text-sm text-ink placeholder:text-muted-ink/70 focus-visible:outline-2 focus-visible:outline-teal"
+   786→                  />
+   787→                </div>
+   788→                <select
+   789→                  aria-label="Status filter" value={statusFilter}
+   790→                  onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+   791→                  className={controlCls}
+   792→                >
+   793→                  <option value="sab">Status: All</option>
+   794→                  <option value="pending">Pending</option>
+   795→                  <option value="confirmed">Confirmed</option>
+   796→                  <option value="completed">Completed</option>
+   797→                  <option value="cancelled">Cancelled</option>
+   798→                </select>
+   799→                <select
+   800→                  aria-label="Type filter" value={typeFilter}
+   801→                  onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
+   802→                  className={controlCls}
+   803→                >
+   804→                  <option value="sab">Type: All</option>
+   805→                  <option value="new">New</option>
+   806→                  <option value="followup">Follow-up</option>
+   807→                </select>
+   808→                <select
+   809→                  aria-label="Service filter" value={activeServiceFilter}
+   810→                  onChange={(event) => setServiceFilter(event.target.value)}
+   811→                  className={controlCls}
+   812→                >
+   813→                  <option value="sab">Service: All</option>
+   814→                  {services.map((service) => (
+   815→                    <option key={service} value={service}>{service}</option>
+   816→                  ))}
+   817→                </select>
+   818→              </div>
+   819→            </div>
+   820→
+   821→            <div className="va-scroll max-h-[62vh] overflow-y-auto px-5 pb-5 md:px-6 md:pb-6" aria-busy={refreshing} aria-live="polite">
+   822→              {loading ? (
+   823→                <ListSkeleton />
+   824→              ) : filtered.length === 0 ? (
+   825→                <div className="rounded-3xl border border-dashed border-teal/25 bg-white/70 px-6 py-16 text-center">
+   826→                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-mint text-teal-2">
+   827→                    <Sparkles className="h-6 w-6" aria-hidden />
+   828→                  </div>
+   829→                  <p className="mt-4 font-display text-2xl text-ink">No appointments found</p>
+   830→                  <p className="mt-1 text-sm text-muted-ink">Reset the filters, or wait for new bookings to arrive.</p>
+   831→                </div>
+   832→              ) : (
+   833→                <ul className="space-y-3" aria-label="Appointments list">
+   834→                  {filtered.map((appt) => (
+   835→                    <AppointmentRow
+   836→                      key={appt.id} appt={appt} isToday={appt.date === todayKey} busy={updatingId === appt.id} onStatus={updateStatus}
+   837→                    />
+   838→                  ))}
+   839→                </ul>
+   840→              )}
+   841→            </div>
+   842→          </section>
+   843→        </main>
+   844→
+   845→        <aside className="rounded-3xl border border-teal/15 bg-white/85 p-5 shadow-sm backdrop-blur md:p-6" aria-label="Slot board">
+   846→          <div className="flex flex-wrap items-center justify-between gap-3">
+   847→            <h2 className="font-display text-2xl text-ink">Slot Board</h2>
+   848→            <input
+   849→              type="date" value={slotDate} onChange={(event) => setSlotDate(event.target.value)}
+   850→              aria-label="Slot board date" className={controlCls}
+   851→            />
+   852→          </div>
+   853→          <p className="mt-1 text-xs text-muted-ink">
+   854→            {slotDate ? formatApptDate(slotDate) : "—"} · voice agent & website bookings
+   855→          </p>
+   856→
+   857→          <div className="mt-4">
+   858→            {slotsLoading ? (
+   859→              <SlotsSkeleton />
+   860→            ) : slotsError ? (
+   861→              <div className="rounded-2xl border border-rose-200 bg-rose-50/90 p-4 text-sm text-rose-700">
+   862→                <div className="flex items-center gap-2">
+   863→                  <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+   864→                  <span>{slotsError}</span>
+   865→                </div>
+   866→                <button
+   867→                  type="button" onClick={() => void loadAvailability(slotDateRef.current || slotDate)}
+   868→                  className="mt-3 h-10 w-full rounded-full border border-rose-300 bg-white text-xs font-bold uppercase tracking-[0.14em] text-rose-700 transition hover:bg-rose-100 focus-visible:outline-2 focus-visible:outline-teal"
+   869→                >
+   870→                  Retry
+   871→                </button>
+   872→              </div>
+   873→            ) : slotClosed ? (
+   874→              <div className="rounded-2xl border border-teal/15 bg-porcelain-2 px-4 py-10 text-center">
+   875→                <CalendarX className="mx-auto h-8 w-8 text-teal-2" aria-hidden />
+   876→                <p className="mt-3 font-semibold text-ink">Clinic closed (Sunday)</p>
+   877→                <p className="mt-1 text-xs text-muted-ink">Open for appointment-based visits only.</p>
+   878→              </div>
+   879→            ) : slots && slots.length > 0 ? (
+   880→              <>
+   881→                <div className="mb-3 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-ink">
+   882→                  <span>{freeCount} free</span>
+   883→                  <span>{bookedCount} booked</span>
+   884→                </div>
+   885→                <div className="grid grid-cols-2 gap-2">
+   886→                  {slots.map((slot) => (
+   887→                    <SlotChip key={slot.time} slot={slot} />
+   888→                  ))}
+   889→                </div>
+   890→              </>
+   891→            ) : (
+   892→              <div className="rounded-2xl border border-dashed border-teal/25 bg-porcelain-2 px-4 py-8 text-center text-sm text-muted-ink">
+   893→                No slots available for this date.
+   894→              </div>
+   895→            )}
+   896→          </div>
+   897→        </aside>
+   898→      </div>
+   899→    </div>
+   900→  );
+   901→}
+   902→

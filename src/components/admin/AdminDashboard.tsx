@@ -226,7 +226,7 @@ function SlotChip({ slot }: { slot: AvailabilitySlot }) {
 
 function ListSkeleton() {
   return (
-    <div className="space-y-3" aria-label="Appointments load ho rahi hain">
+    <div className="space-y-3" aria-label="Loading appointments">
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className="rounded-2xl border border-teal/10 bg-white/60 p-4 md:p-5" aria-hidden>
           <div className="animate-pulse space-y-3">
