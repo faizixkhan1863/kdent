@@ -1,0 +1,914 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useCallback, useEffect, useRef, useState } from "react";
+     4→     4→import { AudioLines, MessageCircle, Mic, Send, Sparkles, Square, X } from "lucide-react";
+     5→     5→
+     6→     6→/* ------------------------------------------------------------------ */
+     7→     7→/* types + constants                                                   */
+     8→     8→/* ------------------------------------------------------------------ */
+     9→     9→
+    10→    10→type AgentState = "idle" | "listening" | "thinking" | "speaking";
+    11→    11→type Lang = "ur" | "en";
+    12→    12→type Emotion = "neutral" | "warm" | "reassuring" | "excited" | "sorry";
+    13→    13→interface Turn {
+    14→    14→  who: "you" | "sana";
+    15→    15→  text: string;
+    16→    16→}
+    17→    17→interface QueueItem {
+    18→    18→  text: string;
+    19→    19→  emotion: Emotion;
+    20→    20→}
+    21→    21→
+    22→    22→const EL_AGENT_ID = "agent_7801m7qwj5qke8jr2vfnd8svng6x"; // Sana — ElevenLabs ConvAI (public agent)
+    23→    23→
+    24→    24→const GREETING =
+    25→    25→  "[warm] السلام علیکم! میں ثنا ہوں، ٹی کے ڈینٹ کی وائس اسسٹنٹ۔ آپ آواز سے یا لکھ کر ٹریٹمنٹس، اوقات یا اپوائنٹمنٹ کے بارے میں پوچھ سکتے ہیں۔";
+    26→    26→const WHATSAPP_URL =
+    27→    27→  "https://wa.me/923123329479?text=" +
+    28→    28→  encodeURIComponent("Assalam o Alaikum! Main appointment book karna chah raha/chah rahi hoon.");
+    29→    29→const MIC_DENIED =
+    30→    30→  "Mic ki permission nahi mili — aap text se bhi pooch saktay hain.";
+    31→    31→const EL_FAILED_HINT =
+    32→    32→  "Premium voice busy hai — offline mode chal raha hai.";
+    33→    33→
+    34→    34→const EMOTION_RE = /^\s*\[(warm|reassuring|excited|neutral|sorry)\]/i;
+    35→    35→const EMO_LIST: Emotion[] = ["warm", "reassuring", "excited", "neutral", "sorry"];
+    36→    36→
+    37→    37→/* minimal SpeechRecognition typings (Safari-safe, no lookbehind regex) */
+    38→    38→interface SRResultEvent {
+    39→    39→  resultIndex: number;
+    40→    40→  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+    41→    41→}
+    42→    42→interface SRErrorEvent {
+    43→    43→  error: string;
+    44→    44→}
+    45→    45→interface SRInstance {
+    46→    46→  lang: string;
+    47→    47→  interimResults: boolean;
+    48→    48→  continuous: boolean;
+    49→    49→  maxAlternatives: number;
+    50→    50→  onresult: ((e: SRResultEvent) => void) | null;
+    51→    51→  onend: (() => void) | null;
+    52→    52→  onerror: ((e: SRErrorEvent) => void) | null;
+    53→    53→  start(): void;
+    54→    54→  stop(): void;
+    55→    55→  abort(): void;
+    56→    56→}
+    57→    57→type SRCtor = new () => SRInstance;
+    58→    58→
+    59→    59→interface ElConversation {
+    60→    60→  endSession(): Promise<void>;
+    61→    61→  sendUserMessage(text: string): void;
+    62→    62→  getInputVolume(): number;
+    63→    63→  getOutputVolume(): number;
+    64→    64→}
+    65→    65→
+    66→    66→/* ------------------------------------------------------------------ */
+    67→    67→/* helpers                                                             */
+    68→    68→/* ------------------------------------------------------------------ */
+    69→    69→
+    70→    70→function splitSentences(text: string): string[] {
+    71→    71→  const raw: string[] = [];
+    72→    72→  let cur = "";
+    73→    73→  for (const ch of text) {
+    74→    74→    if (".!?؟۔".includes(ch) || ch === "\n") {
+    75→    75→      const t = cur.trim();
+    76→    76→      if (t) raw.push(t);
+    77→    77→      cur = "";
+    78→    78→    } else {
+    79→    79→      cur += ch;
+    80→    80→    }
+    81→    81→  }
+    82→    82→  if (cur.trim()) raw.push(cur.trim());
+    83→    83→
+    84→    84→  const merged: string[] = [];
+    85→    85→  for (const part of raw) {
+    86→    86→    const last = merged[merged.length - 1];
+    87→    87→    if (last && (last.length < 14 || part.length < 14) && `${last} ${part}`.length <= 300) {
+    88→    88→      merged[merged.length - 1] = `${last} ${part}`;
+    89→    89→    } else {
+    90→    90→      merged.push(part.slice(0, 320));
+    91→    91→    }
+    92→    92→  }
+    93→    93→  return merged.slice(0, 6);
+    94→    94→}
+    95→    95→
+    96→    96→function parseReply(reply: string): { items: QueueItem[]; plain: string } {
+    97→    97→  const match = reply.match(EMOTION_RE);
+    98→    98→  const emotion = (match && EMO_LIST.includes(match[1] as Emotion) ? match[1] : "neutral") as Emotion;
+    99→    99→  const plain = reply.replace(EMOTION_RE, "").trim();
+   100→   100→  const items = splitSentences(plain).map((text) => ({ text, emotion }));
+   101→   101→  return { items, plain };
+   102→   102→}
+   103→   103→
+   104→   104→function detectLang(text: string): Lang {
+   105→   105→  return /[\u0600-\u06FF]/.test(text) ? "ur" : "en";
+   106→   106→}
+   107→   107→
+   108→   108→/**
+   109→   109→ * Offline fallback brain — keeps the voice agent useful even when the
+   110→   110→ * LLM route or TTS service is unreachable (e.g. static hosting).
+   111→   111→ * Mirrors the clinic facts and the caller's language script.
+   112→   112→ */
+   113→   113→function localBrain(question: string): string {
+   114→   114→  const t = question.toLowerCase();
+   115→   115→  const ur = /[\u0600-\u06FF]/.test(question);
+   116→   116→  const has = (...words: string[]) => words.some((w) => t.includes(w));
+   117→   117→
+   118→   118→  if (has("time", "timing", "hour", "open", "close", "khule", "khol", "waqt", "وقت", "کھل", "اوقات")) {
+   119→   119→    return ur
+   120→   120→      ? "[warm] ہم پیر سے ہفتہ، صبح دس بجے سے شام سات بجے تک کھلے ہیں۔ اتوار بند رہتا ہے۔"
+   121→   121→      : "[warm] We are open Monday to Saturday, 10 AM to 7 PM. Sunday is closed.";
+   122→   122→  }
+   123→   123→  if (has("where", "address", "location", "pata", "address", "کہاں", "پتہ", "لوکیشن")) {
+   124→   124→    return ur
+   125→   125→      ? "[warm] TK Dent Bani Gala، اسلام آباد میں House 34-C، Akram Road پر ہے۔ آپ گوگل میپ سے آسانی سے پہنچ سکتے ہیں۔"
+   126→   126→      : "[warm] We are at House 34-C, Akram Road, Bani Gala, Islamabad. Directions are on the website footer.";
+   127→   127→  }
+   128→   128→  if (has("doctor", "tanveer", "khokhar", "surgeon", "ڈاکٹر", "طنویر", "کھوکھر")) {
+   129→   129→    return ur
+   130→   130→      ? "[warm] ڈاکٹر تنویر کھوکھر ہمارے سینئر Oral and Maxillofacial Surgeon ہیں — FCPS، C-Endo سرٹیفائیڈ، اور ہر کیس ذاتی طور پر دیکھتے ہیں۔"
+   131→   131→      : "[warm] Dr. Tanveer Khokhar is our senior oral and maxillofacial surgeon — FCPS qualified and C-Endo certified. He personally plans every case.";
+   132→   132→  }
+   133→   133→  if (has("book", "appointment", "reserve", "visit", "اپوائنٹ", "بک", "وقت لگوانا")) {
+   134→   134→    setBookFlagExternal();
+   135→   135→    return ur
+   136→   136→      ? "[excited] بہت خوب! اپوائنٹمنٹ کے لیے WhatsApp کریں 0312 3329479 پر، یا ویب سائٹ کا Book بٹن استعمال کریں۔"
+   137→   137→      : "[excited] Wonderful! To book, WhatsApp us on 0312 3329479 or use the Book button on this page.";
+   138→   138→  }
+   139→   139→  if (has("whiten", "polish", "safai", "صفائی", "وائٹ", "صف")) {
+   140→   140→    return ur
+   141→   141→      ? "[warm] Whitening اور Polish کی قیمت 15,000 روپے ہے، دو سیشن شامل ہیں۔"
+   142→   142→      : "[warm] Whitening and polish is Rs. 15,000 for couple sessions.";
+   143→   143→  }
+   144→   144→  if (has("aligner", "braces", "brace", "ایلائن", "بریس")) {
+   145→   145→    return ur
+   146→   146→      ? "[warm] Clear aligners اور braces کے پلانز پانچ ہزار روپے سے شروع ہوتے ہیں۔ تفصیلی قیمت مشاورت پر بتائی جاتی ہے۔"
+   147→   147→      : "[warm] Clear aligners and braces plans start from Rs. 5,000. Exact pricing is confirmed on consultation.";
+   148→   148→  }
+   149→   149→  if (has("implant", "امپلانٹ")) {
+   150→   150→    return ur
+   151→   151→      ? "[reassuring] ڈینٹل امپلانٹس FCPS سرجن کے ہاتھوں کیے جاتے ہیں۔ قیمت مشاورت پر بتائی جاتی ہے — WhatsApp 0312 3329479۔"
+   152→   152→      : "[reassuring] Dental implants are placed by our FCPS surgeon. Pricing is confirmed on consultation — WhatsApp 0312 3329479.";
+   153→   153→  }
+   154→   154→  if (has("root canal", "rct", "canal", "روٹ", "کانال")) {
+   155→   155→    return ur
+   156→   156→      ? "[reassuring] ہمارا Root Canal بالکل پین لیس اور سنگل ویزٹ میں ہوتا ہے، C-Endo سرٹیفائیڈ طریقے سے۔"
+   157→   157→      : "[reassuring] Our root canals are genuinely painless, single visit, and C-Endo certified.";
+   158→   158→  }
+   159→   159→  if (has("service", "treatment", "offer", "کام", "علاج", "سروس")) {
+   160→   160→    return ur
+   161→   161→      ? "[warm] ہم Smile Design، Aligners، Implants، Painless Root Canal، Crowns اور Family Dentistry کرتے ہیں۔ کس کے بارے میں جاننا چاہیں گے؟"
+   162→   162→      : "[warm] We offer smile design, aligners, implants, painless root canals, crowns and family dentistry. Which one shall I explain?";
+   163→   163→  }
+   164→   164→  if (has("whatsapp", "number", "phone", "contact", "نمبر", "فون")) {
+   165→   165→    return ur
+   166→   166→      ? "[warm] ہمارا نمبر 0312 3329479 ہے — WhatsApp اور کال دونوں چلتے ہیں۔"
+   167→   167→      : "[warm] Our number is 0312 3329479 — both WhatsApp and calls work.";
+   168→   168→  }
+   169→   169→  if (has("thanks", "shukriya", "bye", "خدا", "شکریہ", "الوداع")) {
+   170→   170→    return ur
+   171→   171→      ? "[warm] شکریہ! مسکراہٹ مضبوط رکھیں — TK Dent ہمیشہ حاضر ہے۔"
+   172→   172→      : "[warm] Thank you! Keep smiling — TK Dent is always here for you.";
+   173→   173→  }
+   174→   174→  if (has("salam", "hello", "hi", "hey", "سلام", "ہیلو")) {
+   175→   175→    return ur
+   176→   176→      ? "[warm] وعلیکم السلام! بتائیں، آپ کے دانتوں کے بارے میں کیا جاننا ہے؟"
+   177→   177→      : "[warm] Hello! How can I help you with your smile today?";
+   178→   178→  }
+   179→   179→  return ur
+   180→   180→    ? "[sorry] یہ سوال میری محدود آف لائن معلومات میں نہیں ہے۔ براہ کرم WhatsApp کریں 0312 3329479 پر۔"
+   181→   181→    : "[sorry] That one needs our full assistant online. Please WhatsApp us on 0312 3329479 and the team will reply quickly.";
+   182→   182→}
+   183→   183→
+   184→   184→/** module-level hook so localBrain can surface booking intent */
+   185→   185→let bookFlagSetter: (() => void) | null = null;
+   186→   186→function setBookFlagExternal(): void {
+   187→   187→  bookFlagSetter?.();
+   188→   188→}
+   189→   189→
+   190→   190→async function fetchBlob(text: string, lang: Lang, emotion: Emotion): Promise<Blob> {
+   191→   191→  const ctrl = new AbortController();
+   192→   192→  const timer = setTimeout(() => ctrl.abort(), 20000);
+   193→   193→  try {
+   194→   194→    const res = await fetch("/api/voice-agent/tts", {
+   195→   195→      method: "POST",
+   196→   196→      headers: { "Content-Type": "application/json" },
+   197→   197→      body: JSON.stringify({ text, lang, emotion }),
+   198→   198→      signal: ctrl.signal,
+   199→   199→    });
+   200→   200→    if (!res.ok) throw new Error(`tts ${res.status}`);
+   201→   201→    const blob = await res.blob();
+   202→   202→    if (blob.size < 500) throw new Error("tiny audio");
+   203→   203→    return blob;
+   204→   204→  } finally {
+   205→   205→    clearTimeout(timer);
+   206→   206→  }
+   207→   207→}
+   208→   208→
+   209→   209→/* ------------------------------------------------------------------ */
+   210→   210→/* component                                                           */
+   211→   211→/* ------------------------------------------------------------------ */
+   212→   212→
+   213→   213→export default function VoiceAgent() {
+   214→   214→  const [open, setOpen] = useState(false);
+   215→   215→  const [state, setState] = useState<AgentState>("idle");
+   216→   216→  const [inputLang, setInputLang] = useState<Lang>("ur");
+   217→   217→  const [turns, setTurns] = useState<Turn[]>([]);
+   218→   218→  const [caption, setCaption] = useState("");
+   219→   219→  const [interim, setInterim] = useState("");
+   220→   220→  const [draft, setDraft] = useState("");
+   221→   221→  const [micHint, setMicHint] = useState("");
+   222→   222→  const [voiceInputOk, setVoiceInputOk] = useState(true);
+   223→   223→  const [bookHint, setBookHint] = useState(false);
+   224→   224→  const [premiumMode, setPremiumMode] = useState<"off" | "voice" | "text">("off");
+   225→   225→
+   226→   226→  const historyRef = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
+   227→   227→  const runIdRef = useRef(0);
+   228→   228→  const audioRef = useRef<HTMLAudioElement | null>(null);
+   229→   229→  const recRef = useRef<SRInstance | null>(null);
+   230→   230→  const streamRef = useRef<MediaStream | null>(null);
+   231→   231→  const ctxRef = useRef<AudioContext | null>(null);
+   232→   232→  const rafRef = useRef<number>(0);
+   233→   233→  const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
+   234→   234→  const stateRef = useRef<AgentState>("idle");
+   235→   235→  const logRef = useRef<HTMLDivElement | null>(null);
+   236→   236→  const thinkingRef = useRef(false);
+   237→   237→  const elConvRef = useRef<ElConversation | null>(null);
+   238→   238→  const elTextOnlyRef = useRef(false);
+   239→   239→  const premiumFailedRef = useRef(false);
+   240→   240→
+   241→   241→  useEffect(() => {
+   242→   242→    stateRef.current = state;
+   243→   243→  }, [state]);
+   244→   244→
+   245→   245→  useEffect(() => {
+   246→   246→    bookFlagSetter = () => setBookHint(true);
+   247→   247→    return () => {
+   248→   248→      bookFlagSetter = null;
+   249→   249→    };
+   250→   250→  }, []);
+   251→   251→
+   252→   252→  useEffect(() => {
+   253→   253→    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+   254→   254→  }, [turns, interim, caption]);
+   255→   255→
+   256→   256→  /* ---------- ElevenLabs premium session ---------- */
+   257→   257→
+   258→   258→  const stopVisual = useCallback(() => {
+   259→   259→    cancelAnimationFrame(rafRef.current);
+   260→   260→    ctxRef.current?.close().catch(() => {});
+   261→   261→    ctxRef.current = null;
+   262→   262→    streamRef.current?.getTracks().forEach((t) => t.stop());
+   263→   263→    streamRef.current = null;
+   264→   264→    barsRef.current.forEach((b) => {
+   265→   265→      if (b) b.style.transform = "scaleY(0.3)";
+   266→   266→    });
+   267→   267→  }, []);
+   268→   268→
+   269→   269→  /** rAF loop driving the waveform from the ElevenLabs session volumes */
+   270→   270→  const startElVisual = useCallback(() => {
+   271→   271→    const loop = () => {
+   272→   272→      const conv = elConvRef.current;
+   273→   273→      if (!conv) return;
+   274→   274→      const vol = stateRef.current === "speaking" ? conv.getOutputVolume() : conv.getInputVolume();
+   275→   275→      barsRef.current.forEach((b, i) => {
+   276→   276→        if (!b) return;
+   277→   277→        const centerBoost = 1 - Math.abs(i - 2) * 0.18;
+   278→   278→        const v = Math.min(1, Math.max(0.05, vol * 2.4 * centerBoost));
+   279→   279→        b.style.transform = `scaleY(${(0.22 + v * 1.6).toFixed(2)})`;
+   280→   280→      });
+   281→   281→      rafRef.current = requestAnimationFrame(loop);
+   282→   282→    };
+   283→   283→    loop();
+   284→   284→  }, []);
+   285→   285→
+   286→   286→  const endElSession = useCallback(async () => {
+   287→   287→    const conv = elConvRef.current;
+   288→   288→    elConvRef.current = null;
+   289→   289→    elTextOnlyRef.current = false;
+   290→   290→    setPremiumMode("off");
+   291→   291→    if (conv) {
+   292→   292→      try {
+   293→   293→        await conv.endSession();
+   294→   294→      } catch {}
+   295→   295→    }
+   296→   296→  }, []);
+   297→   297→
+   298→   298→  const startElVoice = useCallback(async (): Promise<boolean> => {
+   299→   299→    if (premiumFailedRef.current) return false;
+   300→   300→    try {
+   301→   301→      setState("thinking");
+   302→   302→      const { Conversation } = await import("@elevenlabs/client");
+   303→   303→      const conv = (await Conversation.startSession({
+   304→   304→        agentId: EL_AGENT_ID,
+   305→   305→        onMessage: (msg: { source: "user" | "ai"; message?: string }) => {
+   306→   306→          const text = (msg.message ?? "").trim();
+   307→   307→          if (!text) return;
+   308→   308→          setTurns((t) => {
+   309→   309→            const last = t[t.length - 1];
+   310→   310→            if (last && last.who === (msg.source === "ai" ? "sana" : "you") && last.text === text) return t;
+   311→   311→            return [...t, { who: msg.source === "ai" ? "sana" : "you", text }];
+   312→   312→          });
+   313→   313→          if (msg.source === "ai" && elTextOnlyRef.current) {
+   314→   314→            // text-only session: speak the reply through our TTS route
+   315→   315→            const { items, plain } = parseReply(text);
+   316→   316→            const lang = detectLang(plain);
+   317→   317→            void runQueue(items, lang);
+   318→   318→          }
+   319→   319→        },
+   320→   320→        onModeChange: (prop: { mode: "speaking" | "listening" }) => {
+   321→   321→          if (!elConvRef.current) return;
+   322→   322→          setState(prop.mode === "speaking" ? "speaking" : "listening");
+   323→   323→          if (prop.mode === "listening") setCaption("");
+   324→   324→        },
+   325→   325→        onStatusChange: (prop: { status: "connected" | "disconnected" | "connecting" | "disconnecting" }) => {
+   326→   326→          if (prop.status === "disconnected" && elConvRef.current) {
+   327→   327→            void endElSession();
+   328→   328→            setState("idle");
+   329→   329→            stopVisual();
+   330→   330→          }
+   331→   331→        },
+   332→   332→        onError: () => {
+   333→   333→          // quota exhausted / network issue -> mark premium as failed for this page view
+   334→   334→          premiumFailedRef.current = true;
+   335→   335→          void endElSession();
+   336→   336→          stopVisual();
+   337→   337→          setState("idle");
+   338→   338→          setMicHint(EL_FAILED_HINT);
+   339→   339→        },
+   340→   340→      })) as unknown as ElConversation;
+   341→   341→
+   342→   342→      elConvRef.current = conv;
+   343→   343→      elTextOnlyRef.current = false;
+   344→   344→      setPremiumMode("voice");
+   345→   345→      setMicHint("");
+   346→   346→      setState("listening");
+   347→   347→      startElVisual();
+   348→   348→      return true;
+   349→   349→    } catch {
+   350→   350→      return false;
+   351→   351→    }
+   352→   352→  }, [endElSession, startElVisual, stopVisual]);
+   353→   353→
+   354→   354→  /* ---------- legacy pipeline (brain route + TTS route) ---------- */
+   355→   355→
+   356→   356→  const stopAll = useCallback(() => {
+   357→   357→    runIdRef.current += 1;
+   358→   358→    if (audioRef.current) {
+   359→   359→      try {
+   360→   360→        audioRef.current.pause();
+   361→   361→      } catch {}
+   362→   362→      audioRef.current = null;
+   363→   363→    }
+   364→   364→    try {
+   365→   365→      window.speechSynthesis?.cancel();
+   366→   366→    } catch {}
+   367→   367→  }, []);
+   368→   368→
+   369→   369→  const playBlob = useCallback((blob: Blob, runId: number) => {
+   370→   370→    return new Promise<void>((resolve) => {
+   371→   371→      if (runId !== runIdRef.current) return resolve();
+   372→   372→      const url = URL.createObjectURL(blob);
+   373→   373→      const audio = new Audio(url);
+   374→   374→      audioRef.current = audio;
+   375→   375→      audio.onended = () => {
+   376→   376→        URL.revokeObjectURL(url);
+   377→   377→        resolve();
+   378→   378→      };
+   379→   379→      audio.onerror = () => {
+   380→   380→        URL.revokeObjectURL(url);
+   381→   381→        resolve();
+   382→   382→      };
+   383→   383→      audio.play().catch(() => resolve());
+   384→   384→    });
+   385→   385→  }, []);
+   386→   386→
+   387→   387→  const speakFallback = useCallback(
+   388→   388→    (text: string, lang: Lang, emotion: Emotion, runId: number) => {
+   389→   389→      return new Promise<void>((resolve) => {
+   390→   390→        if (runId !== runIdRef.current) return resolve();
+   391→   391→        try {
+   392→   392→          const synth = window.speechSynthesis;
+   393→   393→          if (!synth) return resolve();
+   394→   394→          const u = new SpeechSynthesisUtterance(text);
+   395→   395→          u.lang = lang === "ur" ? "ur-PK" : "en-US";
+   396→   396→          u.rate = emotion === "excited" ? 1.12 : emotion === "sorry" ? 0.88 : 1;
+   397→   397→          const voices = synth.getVoices();
+   398→   398→          const voice = voices.find((v) =>
+   399→   399→            v.lang.toLowerCase().startsWith(lang === "ur" ? "ur" : "en"),
+   400→   400→          );
+   401→   401→          if (voice) u.voice = voice;
+   402→   402→          let done = false;
+   403→   403→          const finish = () => {
+   404→   404→            if (!done) {
+   405→   405→              done = true;
+   406→   406→              resolve();
+   407→   407→            }
+   408→   408→          };
+   409→   409→          u.onend = finish;
+   410→   410→          u.onerror = finish;
+   411→   411→          synth.speak(u);
+   412→   412→          setTimeout(finish, Math.max(6000, text.length * 120));
+   413→   413→        } catch {
+   414→   414→          resolve();
+   415→   415→        }
+   416→   416→      });
+   417→   417→    },
+   418→   418→    [],
+   419→   419→  );
+   420→   420→
+   421→   421→  const runQueue = useCallback(
+   422→   422→    async (items: QueueItem[], lang: Lang) => {
+   423→   423→      const runId = ++runIdRef.current;
+   424→   424→      setState("speaking");
+   425→   425→
+   426→   426→      interface Job {
+   427→   427→        item: QueueItem;
+   428→   428→        blobP: Promise<Blob | null> | null;
+   429→   429→      }
+   430→   430→      const jobs: Job[] = items.map((item) => ({ item, blobP: null }));
+   431→   431→      const startFetch = (idx: number) => {
+   432→   432→        if (idx >= 0 && idx < jobs.length && !jobs[idx].blobP) {
+   433→   433→          jobs[idx].blobP = fetchBlob(jobs[idx].item.text, lang, jobs[idx].item.emotion).catch(
+   434→   434→            () => null,
+   435→   435→          );
+   436→   436→        }
+   437→   437→      };
+   438→   438→      startFetch(0);
+   439→   439→      startFetch(1);
+   440→   440→
+   441→   441→      for (let i = 0; i < jobs.length; i += 1) {
+   442→   442→        if (runId !== runIdRef.current) return;
+   443→   443→        startFetch(i + 2);
+   444→   444→        setCaption(jobs[i].item.text);
+   445→   445→        const blob = await jobs[i].blobP;
+   446→   446→        if (runId !== runIdRef.current) return;
+   447→   447→
+   448→   448→        if (blob) {
+   449→   449→          await playBlob(blob, runId);
+   450→   450→        } else {
+   451→   451→          await speakFallback(jobs[i].item.text, lang, jobs[i].item.emotion, runId);
+   452→   452→        }
+   453→   453→        if (runId !== runIdRef.current) return;
+   454→   454→      }
+   455→   455→
+   456→   456→      if (runId === runIdRef.current) {
+   457→   457→        setState(elConvRef.current ? "listening" : "idle");
+   458→   458→        setCaption("");
+   459→   459→      }
+   460→   460→    },
+   461→   461→    [playBlob, speakFallback],
+   462→   462→  );
+   463→   463→
+   464→   464→  const speakReply = useCallback(
+   465→   465→    (reply: string) => {
+   466→   466→      const { items, plain } = parseReply(reply);
+   467→   467→      const lang = detectLang(plain);
+   468→   468→      setTurns((t) => [...t, { who: "sana", text: plain }]);
+   469→   469→      historyRef.current = [
+   470→   470→        ...historyRef.current,
+   471→   471→        { role: "assistant" as const, content: plain },
+   472→   472→      ].slice(-12);
+   473→   473→      if (items.length > 0) {
+   474→   474→        void runQueue(items, lang);
+   475→   475→      } else {
+   476→   476→        setState("idle");
+   477→   477→      }
+   478→   478→    },
+   479→   479→    [runQueue],
+   480→   480→  );
+   481→   481→
+   482→   482→  const pushUserTurn = useCallback((text: string) => {
+   483→   483→    setTurns((t) => [...t, { who: "you", text }]);
+   484→   484→    historyRef.current = [
+   485→   485→      ...historyRef.current,
+   486→   486→      { role: "user" as const, content: text },
+   487→   487→    ].slice(-12);
+   488→   488→  }, []);
+   489→   489→
+   490→   490→  const legacySend = useCallback(
+   491→   491→    async (text: string) => {
+   492→   492→      thinkingRef.current = true;
+   493→   493→      setState("thinking");
+   494→   494→      pushUserTurn(text);
+   495→   495→      try {
+   496→   496→        const res = await fetch("/api/voice-agent/chat", {
+   497→   497→          method: "POST",
+   498→   498→          headers: { "Content-Type": "application/json" },
+   499→   499→          body: JSON.stringify({ messages: historyRef.current }),
+   500→   500→        });
+   501→   501→        const data = (await res.json()) as { reply?: string; error?: string; booking?: boolean };
+   502→   502→        if (!res.ok || !data.reply) throw new Error(data.error ?? "brain failed");
+   503→   503→        if (data.booking) setBookHint(true);
+   504→   504→        speakReply(data.reply);
+   505→   505→      } catch {
+   506→   506→        setMicHint("");
+   507→   507→        speakReply(localBrain(text));
+   508→   508→      } finally {
+   509→   509→        thinkingRef.current = false;
+   510→   510→      }
+   511→   511→    },
+   512→   512→    [pushUserTurn, speakReply],
+   513→   513→  );
+   514→   514→
+   515→   515→  const sendMessage = useCallback(
+   516→   516→    async (raw: string) => {
+   517→   517→      const text = raw.trim();
+   518→   518→      if (!text || thinkingRef.current) return;
+   519→   519→      stopAll();
+   520→   520→      setInterim("");
+   521→   521→      setCaption("");
+   522→   522→      setBookHint(false);
+   523→   523→
+   524→   524→      // 1) premium session already live? just forward the text
+   525→   525→      if (elConvRef.current) {
+   526→   526→        setState("thinking");
+   527→   527→        pushUserTurn(text);
+   528→   528→        try {
+   529→   529→          elConvRef.current.sendUserMessage(text);
+   530→   530→          return;
+   531→   531→        } catch {
+   532→   532→          await endElSession();
+   533→   533→        }
+   534→   534→      }
+   535→   535→
+   536→   536→      // 2) try starting a premium session (voice first; legacy on failure)
+   537→   537→      if (!premiumFailedRef.current) {
+   538→   538→        setState("thinking");
+   539→   539→        const ok = await startElVoice();
+   540→   540→        if (ok && elConvRef.current) {
+   541→   541→          // the session plays the agent's Urdu greeting; forward the question after it
+   542→   542→          setTimeout(() => {
+   543→   543→            try {
+   544→   544→              elConvRef.current?.sendUserMessage(text);
+   545→   545→            } catch {}
+   546→   546→          }, 2200);
+   547→   547→          return;
+   548→   548→        }
+   549→   549→        await endElSession();
+   550→   550→      }
+   551→   551→
+   552→   552→      // 3) legacy pipeline (pushes its own user turn)
+   553→   553→      setMicHint(premiumFailedRef.current ? EL_FAILED_HINT : "");
+   554→   554→      void legacySend(text);
+   555→   555→    },
+   556→   556→    [endElSession, legacySend, pushUserTurn, startElVoice, stopAll],
+   557→   557→  );
+   558→   558→
+   559→   559→  /* ---------- mic + visualizer (legacy listening path) ---------- */
+   560→   560→
+   561→   561→  const startVisual = useCallback(async () => {
+   562→   562→    try {
+   563→   563→      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+   564→   564→      streamRef.current = stream;
+   565→   565→      const ctx = new AudioContext();
+   566→   566→      ctxRef.current = ctx;
+   567→   567→      const analyser = ctx.createAnalyser();
+   568→   568→      analyser.fftSize = 64;
+   569→   569→      ctx.createMediaStreamSource(stream).connect(analyser);
+   570→   570→      const data = new Uint8Array(analyser.frequencyBinCount);
+   571→   571→      const loop = () => {
+   572→   572→        if (!ctxRef.current) return;
+   573→   573→        analyser.getByteFrequencyData(data);
+   574→   574→        barsRef.current.forEach((b, i) => {
+   575→   575→          if (!b) return;
+   576→   576→          const v = data[3 + i * 5] / 255;
+   577→   577→          b.style.transform = `scaleY(${(0.22 + v * 1.6).toFixed(2)})`;
+   578→   578→        });
+   579→   579→        rafRef.current = requestAnimationFrame(loop);
+   580→   580→      };
+   581→   581→      loop();
+   582→   582→    } catch {
+   583→   583→      barsRef.current.forEach((b, i) => {
+   584→   584→        if (b) b.classList.add("va-bar-fallback");
+   585→   585→      });
+   586→   586→    }
+   587→   587→  }, []);
+   588→   588→
+   589→   589→  const stopListening = useCallback(() => {
+   590→   590→    try {
+   591→   591→      recRef.current?.stop();
+   592→   592→    } catch {}
+   593→   593→    stopVisual();
+   594→   594→    if (stateRef.current === "listening") setState("idle");
+   595→   595→  }, [stopVisual]);
+   596→   596→
+   597→   597→  const startListening = useCallback(() => {
+   598→   598→    const Ctor = (
+   599→   599→      window as unknown as {
+   600→   600→        SpeechRecognition?: SRCtor;
+   601→   601→        webkitSpeechRecognition?: SRCtor;
+   602→   602→      }
+   603→   603→    ).SpeechRecognition ||
+   604→   604→    (window as unknown as { webkitSpeechRecognition?: SRCtor }).webkitSpeechRecognition;
+   605→   605→
+   606→   606→    if (premiumFailedRef.current || !Ctor) {
+   607→   607→      if (!Ctor) {
+   608→   608→        setVoiceInputOk(false);
+   609→   609→        setMicHint("Is browser mein voice input support nahi — text se poochein.");
+   610→   610→      } else {
+   611→   611→        setMicHint(EL_FAILED_HINT);
+   612→   612→      }
+   613→   613→      return;
+   614→   614→    }
+   615→   615→
+   616→   616→    stopAll();
+   617→   617→    setCaption("");
+   618→   618→    setInterim("");
+   619→   619→    setMicHint("");
+   620→   620→    setState("listening");
+   621→   621→
+   622→   622→    void (async () => {
+   623→   623→      const ok = await startElVoice();
+   624→   624→      if (!ok) {
+   625→   625→        // mic may be denied or quota hit -> fall back to browser recognition + legacy pipeline
+   626→   626→        stopVisual();
+   627→   627→        setState("idle");
+   628→   628→        if (premiumFailedRef.current) {
+   629→   629→          setMicHint(EL_FAILED_HINT);
+   630→   630→        } else {
+   631→   631→          setVoiceInputOk(false);
+   632→   632→          setMicHint(MIC_DENIED);
+   633→   633→        }
+   634→   634→      }
+   635→   635→    })();
+   636→   636→  }, [startElVoice, stopAll, stopVisual]);
+   637→   637→
+   638→   638→  const endVoiceSession = useCallback(() => {
+   639→   639→    stopAll();
+   640→   640→    stopVisual();
+   641→   641→    void endElSession();
+   642→   642→    setState("idle");
+   643→   643→    setCaption("");
+   644→   644→  }, [endElSession, stopAll, stopVisual]);
+   645→   645→
+   646→   646→  /* ---------- greeting + cleanup ---------- */
+   647→   647→
+   648→   648→  const openPanel = useCallback(() => {
+   649→   649→    setOpen(true);
+   650→   650→  }, []);
+   651→   651→
+   652→   652→  const closePanel = useCallback(() => {
+   653→   653→    stopAll();
+   654→   654→    stopListening();
+   655→   655→    void endElSession();
+   656→   656→    setOpen(false);
+   657→   657→  }, [endElSession, stopAll, stopListening]);
+   658→   658→
+   659→   659→  useEffect(() => {
+   660→   660→    return () => {
+   661→   661→      stopAll();
+   662→   662→      stopVisual();
+   663→   663→      void endElSession();
+   664→   664→    };
+   665→   665→  }, [endElSession, stopAll, stopVisual]);
+   666→   666→
+   667→   667→  /* ---------- render ---------- */
+   668→   668→
+   669→   669→  const statusText =
+   670→   670→    state === "listening"
+   671→   671→      ? premiumMode === "voice"
+   672→   672→        ? "Sun rahi hoon — boliye!"
+   673→   673→        : "Sun rahi hoon..."
+   674→   674→      : state === "thinking"
+   675→   675→        ? "Soch rahi hoon..."
+   676→   676→        : state === "speaking"
+   677→   677→          ? "Jawab de rahi hoon — boliye to beech mein rok doongi"
+   678→   678→          : "Boliye ya likhiye — jawab awaz mein milega";
+   679→   679→
+   680→   680→  const orbStyle = { bottom: "calc(1.15rem + env(safe-area-inset-bottom))", right: "1.15rem" };
+   681→   681→
+   682→   682→  if (!open) {
+   683→   683→    return (
+   684→   684→      <button
+   685→   685→        type="button"
+   686→   686→        onClick={openPanel}
+   687→   687→        aria-label="TK Dent voice assistant kholen"
+   688→   688→        className="va-orb fixed z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-teal to-[#07272B] text-white shadow-xl transition-transform duration-300 hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal sm:h-16 sm:w-16"
+   689→   689→        style={orbStyle}
+   690→   690→      >
+   691→   691→        <AudioLines className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+   692→   692→      </button>
+   693→   693→    );
+   694→   694→  }
+   695→   695→
+   696→   696→  return (
+   697→   697→    <section
+   698→   698→      role="dialog"
+   699→   699→      aria-label="TK Dent voice assistant Sana"
+   700→   700→      className="fixed z-[80] w-[min(92vw,380px)] overflow-hidden rounded-3xl border border-teal/25 bg-white/90 shadow-2xl backdrop-blur-xl"
+   701→   701→      style={orbStyle}
+   702→   702→    >
+   703→   703→      {/* header */}
+   704→   704→      <header className="flex items-center gap-3 border-b border-teal/15 bg-gradient-to-r from-teal/10 to-mint/20 px-4 py-3">
+   705→   705→        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-teal to-[#07272B] text-white">
+   706→   706→          <AudioLines className="h-4 w-4" aria-hidden="true" />
+   707→   707→        </span>
+   708→   708→        <span className="min-w-0 flex-1">
+   709→   709→          <span className="block text-sm font-bold leading-tight text-ink">Sana</span>
+   710→   710→          <span className="block truncate text-[11px] leading-tight text-muted-ink">
+   711→   711→            {premiumMode === "voice" ? "TK Dent Voice Assistant · Premium" : "TK Dent Voice Assistant"}
+   712→   712→          </span>
+   713→   713→        </span>
+   714→   714→        <div
+   715→   715→          className="flex items-center gap-1 rounded-full border border-teal/25 bg-white/70 p-0.5"
+   716→   716→          role="group"
+   717→   717→          aria-label="Boli jani wali zuban"
+   718→   718→        >
+   719→   719→          {(["ur", "en"] as Lang[]).map((l) => (
+   720→   720→            <button
+   721→   721→              key={l}
+   722→   722→              type="button"
+   723→   723→              onClick={() => setInputLang(l)}
+   724→   724→              aria-pressed={inputLang === l}
+   725→   725→              className={`rounded-full px-2 py-1 text-[11px] font-semibold transition-colors ${
+   726→   726→                inputLang === l ? "bg-teal text-white" : "text-muted-ink hover:text-teal"
+   727→   727→              }`}
+   728→   728→            >
+   729→   729→              {l === "ur" ? "اردو" : "EN"}
+   730→   730→            </button>
+   731→   731→          ))}
+   732→   732→        </div>
+   733→   733→        <button
+   734→   734→          type="button"
+   735→   735→          onClick={closePanel}
+   736→   736→          aria-label="Assistant band karein"
+   737→   737→          className="flex h-9 w-9 items-center justify-center rounded-full text-muted-ink transition-colors hover:bg-teal/10 hover:text-teal"
+   738→   738→        >
+   739→   739→          <X className="h-4 w-4" aria-hidden="true" />
+   740→   740→        </button>
+   741→   741→      </header>
+   742→   742→
+   743→   743→      {/* status zone */}
+   744→   744→      <div className="flex flex-col items-center gap-3 px-4 pb-3 pt-5">
+   745→   745→        <div className="flex items-center gap-4">
+   746→   746→          <span
+   747→   747→            className={`flex h-12 w-12 items-center justify-center rounded-full text-white transition-all duration-300 ${
+   748→   748→              state === "speaking"
+   749→   749→                ? "bg-gradient-to-br from-teal to-[#0B6B63] shadow-lg shadow-teal/40 scale-105"
+   750→   750→                : state === "listening"
+   751→   751→                  ? "bg-gradient-to-br from-teal to-[#07272B] va-orb"
+   752→   752→                  : "bg-gradient-to-br from-teal to-[#07272B]"
+   753→   753→            }`}
+   754→   754→          >
+   755→   755→            {state === "listening" ? (
+   756→   756→              <Mic className="h-5 w-5" aria-hidden="true" />
+   757→   757→            ) : state === "thinking" ? (
+   758→   758→              <Sparkles className="h-5 w-5 animate-pulse" aria-hidden="true" />
+   759→   759→            ) : (
+   760→   760→              <AudioLines className="h-5 w-5" aria-hidden="true" />
+   761→   761→            )}
+   762→   762→          </span>
+   763→   763→
+   764→   764→          <span className="flex h-9 items-end gap-1.5" aria-hidden="true">
+   765→   765→            {[0, 1, 2, 3, 4].map((i) => (
+   766→   766→              <span
+   767→   767→                key={i}
+   768→   768→                ref={(el) => {
+   769→   769→                  barsRef.current[i] = el;
+   770→   770→                }}
+   771→   771→                className={`w-1.5 rounded-full bg-teal transition-[height] ${
+   772→   772→                  state === "listening" || state === "speaking" ? "h-8" : "h-2 opacity-40"
+   773→   773→                }`}
+   774→   774→                style={{ transform: "scaleY(0.3)", transformOrigin: "center bottom" }}
+   775→   775→              />
+   776→   776→            ))}
+   777→   777→          </span>
+   778→   778→        </div>
+   779→   779→
+   780→   780→        <p className="text-xs font-semibold text-muted-ink" aria-hidden="true">
+   781→   781→          {statusText}
+   782→   782→        </p>
+   783→   783→
+   784→   784→        <p
+   785→   785→          aria-live="polite"
+   786→   786→          aria-atomic="true"
+   787→   787→          className="min-h-[2.5rem] w-full rounded-2xl bg-mint/25 px-3 py-2 text-center text-[13px] font-medium leading-snug text-ink"
+   788→   788→        >
+   789→   789→          {caption || interim || "…"}
+   790→   790→        </p>
+   791→   791→      </div>
+   792→   792→
+   793→   793→      {/* transcript */}
+   794→   794→      <div
+   795→   795→        ref={logRef}
+   796→   796→        role="log"
+   797→   797→        aria-label="Baat cheet ka record"
+   798→   798→        className="max-h-32 overflow-y-auto border-y border-teal/15 bg-white/50 px-4 py-2 va-scroll"
+   799→   799→      >
+   800→   800→        {turns.length === 0 && interim === "" ? (
+   801→   801→          <p className="py-2 text-center text-[11px] text-muted-ink">
+   802→   802→            Mic dabayen aur boliye — Sana khud salam karegi, ya sawal likhein.
+   803→   803→          </p>
+   804→   804→        ) : (
+   805→   805→          turns.map((t, i) => (
+   806→   806→            <p key={i} className="py-0.5 text-[12px] leading-snug text-muted-ink">
+   807→   807→              <span className={`font-bold ${t.who === "you" ? "text-ink" : "text-teal"}`}>
+   808→   808→                {t.who === "you" ? "Aap:" : "Sana:"}
+   809→   809→              </span>{" "}
+   810→   810→              {t.text}
+   811→   811→            </p>
+   812→   812→          ))
+   813→   813→        )}
+   814→   814→        {interim && (
+   815→   815→          <p className="py-0.5 text-[12px] italic leading-snug text-muted-ink/70">
+   816→   816→            <span className="font-bold text-ink">Aap:</span> {interim}…
+   817→   817→          </p>
+   818→   818→        )}
+   819→   819→      </div>
+   820→   820→
+   821→   821→      {/* booking handoff */}
+   822→   822→      {bookHint && (
+   823→   823→        <a
+   824→   824→          href={WHATSAPP_URL}
+   825→   825→          target="_blank"
+   826→   826→          rel="noopener noreferrer"
+   827→   827→          className="mx-3 mb-2 flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-teal to-[#0B6B63] px-4 py-2.5 text-[12px] font-bold text-white shadow-md transition-transform hover:scale-[1.02]"
+   828→   828→        >
+   829→   829→          <MessageCircle className="h-4 w-4" aria-hidden="true" />
+   830→   830→          WhatsApp par appointment book karein
+   831→   831→        </a>
+   832→   832→      )}
+   833→   833→
+   834→   834→      {/* controls */}
+   835→   835→      <div className="flex items-center gap-2 px-3 py-3">
+   836→   836→        <button
+   837→   837→          type="button"
+   838→   838→          onClick={() => {
+   839→   839→            if (premiumMode === "voice") {
+   840→   840→              endVoiceSession();
+   841→   841→            } else {
+   842→   842→              startListening();
+   843→   843→            }
+   844→   844→          }}
+   845→   845→          disabled={state === "thinking"}
+   846→   846→          aria-label={premiumMode === "voice" ? "Voice chat band karein" : "Mic se baat karein"}
+   847→   847→          aria-pressed={premiumMode === "voice"}
+   848→   848→          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal text-white shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+   849→   849→        >
+   850→   850→          {premiumMode === "voice" ? (
+   851→   851→            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+   852→   852→          ) : (
+   853→   853→            <Mic className="h-5 w-5" aria-hidden="true" />
+   854→   854→          )}
+   855→   855→        </button>
+   856→   856→
+   857→   857→        <input
+   858→   858→          type="text"
+   859→   859→          value={draft}
+   860→   860→          onChange={(e) => setDraft(e.target.value)}
+   861→   861→          onKeyDown={(e) => {
+   862→   862→            if (e.key === "Enter" && draft.trim()) {
+   863→   863→              void sendMessage(draft);
+   864→   864→              setDraft("");
+   865→   865→            }
+   866→   866→          }}
+   867→   867→          placeholder={state === "speaking" ? "Sana bol rahi hai..." : "Apna sawal likhein..."}
+   868→   868→          aria-label="Apna sawal likhein"
+   869→   869→          disabled={state === "thinking"}
+   870→   870→          className="h-11 min-w-0 flex-1 rounded-full border border-teal/30 bg-white px-4 text-sm text-ink placeholder:text-muted-ink/60 focus:border-teal focus:outline-none focus:ring-2 focus:ring-teal/25 disabled:opacity-50"
+   871→   871→        />
+   872→   872→
+   873→   873→        {state === "speaking" && premiumMode !== "voice" ? (
+   874→   874→          <button
+   875→   875→            type="button"
+   876→   876→            onClick={() => {
+   877→   877→              stopAll();
+   878→   878→              setState("idle");
+   879→   879→              setCaption("");
+   880→   880→            }}
+   881→   881→            aria-label="Jawab rok dein"
+   882→   882→            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#07272B] text-white shadow-md transition-all hover:scale-105"
+   883→   883→          >
+   884→   884→            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+   885→   885→          </button>
+   886→   886→        ) : (
+   887→   887→          <button
+   888→   888→            type="button"
+   889→   889→            onClick={() => {
+   890→   890→              if (draft.trim()) {
+   891→   891→                void sendMessage(draft);
+   892→   892→                setDraft("");
+   893→   893→              }
+   894→   894→            }}
+   895→   895→            disabled={!draft.trim() || state === "thinking"}
+   896→   896→            aria-label="Sawal bhejein"
+   897→   897→            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal text-white shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+   898→   898→          >
+   899→   899→            <Send className="h-5 w-5" aria-hidden="true" />
+   900→   900→          </button>
+   901→   901→        )}
+   902→   902→      </div>
+   903→   903→
+   904→   904→      {(micHint || !voiceInputOk) && (
+   905→   905→        <p className="px-4 pb-2 text-center text-[11px] leading-snug text-teal">{micHint}</p>
+   906→   906→      )}
+   907→   907→
+   908→   908→      <p className="border-t border-teal/10 bg-white/40 py-1.5 text-center text-[10px] tracking-wide text-muted-ink/70">
+   909→   909→        TK DENT VOICE AI · BY SYNKREW
+   910→   910→      </p>
+   911→   911→    </section>
+   912→   912→  );
+   913→   913→}
+   914→   914→
