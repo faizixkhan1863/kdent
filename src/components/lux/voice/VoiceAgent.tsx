@@ -86,6 +86,7 @@ interface ElConversation {
   sendUserMessage(text: string): void;
   getInputVolume(): number;
   getOutputVolume(): number;
+  setMicMuted(isMuted: boolean): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,6 +292,10 @@ export default function VoiceAgent() {
   const voiceInputOkRef = useRef(true);
   const interimRef = useRef("");
   const speakingSinceRef = useRef(0);
+  // greeting gate: mic stays deaf until Sana finishes her Salaam so room
+  // noise / speaker echo can never become a phantom "user spoke" turn
+  const micGatedRef = useRef(false);
+  const unmuteTimerRef = useRef<number | null>(null);
   const vadSubmitRef = useRef<{ text: string; at: number } | null>(null);
   const draftRef = useRef<DraftFields>({});
   interface LiveQueue {
@@ -352,6 +357,11 @@ export default function VoiceAgent() {
     const conv = elConvRef.current;
     elConvRef.current = null;
     setPremiumLive(false);
+    micGatedRef.current = false;
+    if (unmuteTimerRef.current !== null) {
+      window.clearTimeout(unmuteTimerRef.current);
+      unmuteTimerRef.current = null;
+    }
     try {
       recRef.current?.abort();
       recRef.current = null;
@@ -381,8 +391,21 @@ export default function VoiceAgent() {
     loop();
   }, []);
 
+  /** Lift the greeting gate: hand the mic back to the caller. */
+  const unmuteMic = useCallback(() => {
+    micGatedRef.current = false;
+    if (unmuteTimerRef.current !== null) {
+      window.clearTimeout(unmuteTimerRef.current);
+      unmuteTimerRef.current = null;
+    }
+    try {
+      elConvRef.current?.setMicMuted(false);
+    } catch {}
+  }, []);
+
   /** Force-stop the agent's audio the moment the caller interrupts. */
   const interruptPremium = useCallback(() => {
+    unmuteMic(); // an interrupt means the caller wants to talk — never leave the mic gated
     const conv = elConvRef.current as unknown as
       | { output?: { interrupt?: (reset?: number) => void } }
       | null;
@@ -473,6 +496,11 @@ export default function VoiceAgent() {
             setState("speaking");
           } else {
             setState("listening");
+            // Salaam finished (agent paused) -> hand the mic back shortly
+            if (micGatedRef.current) {
+              if (unmuteTimerRef.current !== null) window.clearTimeout(unmuteTimerRef.current);
+              unmuteTimerRef.current = window.setTimeout(unmuteMic, 700);
+            }
           }
         },
         onStatusChange: (prop: {
@@ -548,6 +576,13 @@ export default function VoiceAgent() {
       setMicHint("");
       setState("listening");
       startElVisual();
+      // GREETING GATE: deaf mic while Sana delivers her Salaam — no phantom
+      // turns from room noise; caller gets their turn the moment she stops.
+      try {
+        conv.setMicMuted(true);
+        micGatedRef.current = true;
+      } catch {}
+      unmuteTimerRef.current = window.setTimeout(unmuteMic, 15000); // absolute safety
       return true;
     } catch {
       setState("idle");
@@ -555,7 +590,7 @@ export default function VoiceAgent() {
     } finally {
       elStartingRef.current = false;
     }
-  }, [endElSession, startElVisual, stopVisual]);
+  }, [endElSession, startElVisual, stopVisual, unmuteMic]);
 
   /** module-bridge so error handlers can speak the offline greeting */
   const ensureAgents = useCallback(async () => {

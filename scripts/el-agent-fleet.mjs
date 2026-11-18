@@ -147,7 +147,7 @@ async function buildAgent(key, index) {
       },
       conversation: { max_duration_seconds: 360, silence_end_call_timeout: 20, client_events: ["audio", "interruption", "user_transcript", "agent_response", "agent_response_correction"] },
       agent: {
-        first_message: "السلام علیکم! میں ثنا ہوں، ٹی کے ڈینٹ کی وائس اسسٹنٹ۔ بتائیں، آپ کو ٹریٹمنٹس یا اپوائنٹمنٹ کے بارے میں کیا جاننا ہے؟",
+        first_message: "السلام علیکم! میں ثنا ہوں، ٹی کے ڈینٹ کی وائس اسسٹنٹ۔ بتائیں، آپ کی کیا مدد کر سکتی ہوں؟",
         language: "ur",
         prompt: { prompt: PROMPT, llm: "gemini-3.5-flash", temperature: 0, tool_ids: toolIds, enable_prompt_caching: true },
       },
