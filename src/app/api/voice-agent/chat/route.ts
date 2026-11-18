@@ -6,6 +6,8 @@
  * Sana speaks ONLY through the TTS route; this route just thinks.
  */
 
+import { existsSync } from "fs";
+import os from "os";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -64,6 +66,61 @@ function sanitizeMessages(raw: unknown): ChatMsg[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* brain providers                                                      */
+/* ------------------------------------------------------------------ */
+
+/** True when the platform z-ai config file exists (sandbox / self-host).
+ *  On Vercel it never exists, so we skip the SDK instantly. */
+function platformConfigExists(): boolean {
+  try {
+    return [
+      "./.z-ai-config",
+      `${os.homedir()}/.z-ai-config`,
+      "/etc/.z-ai-config",
+    ].some((p) => existsSync(p));
+  } catch {
+    return false;
+  }
+}
+
+async function brainPlatform(
+  messages: ChatMsg[],
+): Promise<string> {
+  const { default: ZAI } = await import("z-ai-web-dev-sdk");
+  const zai = await ZAI.create();
+  const completion = (await Promise.race([
+    zai.chat.completions.create({
+      messages: [{ role: "assistant", content: SYSTEM_PROMPT }, ...messages],
+      thinking: { type: "disabled" },
+    }),
+    new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error("platform brain timeout")), 20000),
+    ),
+  ])) as { choices?: Array<{ message?: { content?: string } }> };
+  return completion?.choices?.[0]?.message?.content ?? "";
+}
+
+/** Key-less free LLM (works from Vercel serverless). Rate limited on the
+ *  free tier; the client's offline brain absorbs any 429/402 replies. */
+async function brainPollinations(messages: ChatMsg[]): Promise<string> {
+  const res = await fetch("https://text.pollinations.ai/openai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "openai",
+      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      referrer: "tanveerkhokar.vercel.app",
+    }),
+    signal: AbortSignal.timeout(18000),
+  });
+  if (!res.ok) throw new Error(`pollinations ${res.status}`);
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data?.choices?.[0]?.message?.content ?? "";
+}
+
+/* ------------------------------------------------------------------ */
 /* handler                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -80,21 +137,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "messages required" }, { status: 400 });
   }
 
+  let raw = "";
   try {
-    const { default: ZAI } = await import("z-ai-web-dev-sdk");
-    const zai = await ZAI.create();
+    if (platformConfigExists()) {
+      raw = await brainPlatform(messages);
+    }
+  } catch (err) {
+    console.warn(
+      "[voice-agent/chat] platform brain failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
 
-    const completion = (await Promise.race([
-      zai.chat.completions.create({
-        messages: [{ role: "assistant", content: SYSTEM_PROMPT }, ...messages],
-        thinking: { type: "disabled" },
-      }),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("brain timeout")), 24000)),
-    ])) as { choices?: Array<{ message?: { content?: string } }> };
+  if (!raw.trim()) {
+    try {
+      raw = await brainPollinations(messages);
+    } catch (err) {
+      console.warn(
+        "[voice-agent/chat] pollinations brain failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
-    let reply = (completion?.choices?.[0]?.message?.content ?? "")
-      .replace(/[*_#`]/g, "")
-      .trim();
+  try {
+    let reply = raw.replace(/[*_#`]/g, "").trim();
 
     const booking = /<<\s*BOOK\s*>>/i.test(reply);
     reply = reply
