@@ -3,8 +3,9 @@
  * POST /api/voice-agent/tts  { text, lang: "ur"|"en", emotion? }  -> audio/mpeg
  *
  * Primary engine: msedge-tts (pure JS WebSocket -> Microsoft neural voices).
- *   ur -> ur-PK-UzmaNeural   (native female Urdu voice)
- *   en -> en-US-AndrewMultilingualNeural
+ *   ur -> ur-IN-GulNeural               (female Urdu — clearest in ASR round-trip
+ *                                        vs ur-PK-UzmaNeural / Ava / Emma candidates)
+ *   en -> en-US-AvaMultilingualNeural   (female multilingual; replaces male Andrew)
  * English fallback: platform TTS (z-ai SDK) if the primary engine fails.
  * Client (VoiceAgent.tsx) further falls back to browser speechSynthesis.
  */
@@ -19,8 +20,8 @@ export const maxDuration = 30;
 /* ------------------------------------------------------------------ */
 
 const VOICES: Record<string, string> = {
-  ur: "ur-PK-UzmaNeural",
-  en: "en-US-AndrewMultilingualNeural",
+  ur: "ur-IN-GulNeural",
+  en: "en-US-AvaMultilingualNeural",
 };
 
 const EMOTIONS: Record<string, { rate: string; pitch: string }> = {

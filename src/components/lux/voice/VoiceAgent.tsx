@@ -33,6 +33,9 @@ const EL_FAILED_HINT =
 
 const EMOTION_RE = /^\s*\[(warm|reassuring|excited|neutral|sorry)\]/i;
 const EMO_LIST: Emotion[] = ["warm", "reassuring", "excited", "neutral", "sorry"];
+/** booking intent in an agent reply -> surface the WhatsApp handoff chip */
+const BOOKING_RE =
+  /\b(book|booking|booked|appointment|appointments|reserve)\b|اپوائنٹمنٹ|بکروانا|بک کر|بک رہا|بک جا/i;
 
 /* minimal SpeechRecognition typings (Safari-safe, no lookbehind regex) */
 interface SRResultEvent {
@@ -237,10 +240,21 @@ export default function VoiceAgent() {
   const elConvRef = useRef<ElConversation | null>(null);
   const elTextOnlyRef = useRef(false);
   const premiumFailedRef = useRef(false);
+  const startSRRef = useRef<(() => void) | null>(null);
+  const inputLangRef = useRef<Lang>("ur");
+  const voiceInputOkRef = useRef(true);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    inputLangRef.current = inputLang;
+  }, [inputLang]);
+
+  useEffect(() => {
+    voiceInputOkRef.current = voiceInputOk;
+  }, [voiceInputOk]);
 
   useEffect(() => {
     bookFlagSetter = () => setBookHint(true);
@@ -266,7 +280,23 @@ export default function VoiceAgent() {
     });
   }, []);
 
-  /** rAF loop driving the waveform from the ElevenLabs session volumes */
+  const endElSession = useCallback(async () => {
+    const conv = elConvRef.current;
+    elConvRef.current = null;
+    elTextOnlyRef.current = false;
+    setPremiumMode("off");
+    try {
+      recRef.current?.abort();
+      recRef.current = null;
+    } catch {}
+    if (conv) {
+      try {
+        await conv.endSession();
+      } catch {}
+    }
+  }, []);
+
+  /** rAF loop driving the waveform from the ElevenLabs session volumes (premium audio mode) */
   const startElVisual = useCallback(() => {
     const loop = () => {
       const conv = elConvRef.current;
@@ -283,18 +313,6 @@ export default function VoiceAgent() {
     loop();
   }, []);
 
-  const endElSession = useCallback(async () => {
-    const conv = elConvRef.current;
-    elConvRef.current = null;
-    elTextOnlyRef.current = false;
-    setPremiumMode("off");
-    if (conv) {
-      try {
-        await conv.endSession();
-      } catch {}
-    }
-  }, []);
-
   const startElVoice = useCallback(async (): Promise<boolean> => {
     if (premiumFailedRef.current) return false;
     try {
@@ -302,27 +320,29 @@ export default function VoiceAgent() {
       const { Conversation } = await import("@elevenlabs/client");
       const conv = (await Conversation.startSession({
         agentId: EL_AGENT_ID,
+        // Full audio session — the agent speaks with its native female Urdu
+        // voice (Reva) and handles mic ASR internally. stripAudioTags keeps
+        // expressive tags like [happy] out of the visible transcript.
+        stripAudioTags: true,
         onMessage: (msg: { source: "user" | "ai"; message?: string }) => {
           const text = (msg.message ?? "").trim();
           if (!text) return;
           setTurns((t) => {
             const last = t[t.length - 1];
-            if (last && last.who === (msg.source === "ai" ? "sana" : "you") && last.text === text) return t;
+            if (last && last.who === (msg.source === "ai" ? "sana" : "you") && last.text === text)
+              return t;
             return [...t, { who: msg.source === "ai" ? "sana" : "you", text }];
           });
-          if (msg.source === "ai" && elTextOnlyRef.current) {
-            // text-only session: speak the reply through our TTS route
-            const { items, plain } = parseReply(text);
-            const lang = detectLang(plain);
-            void runQueue(items, lang);
-          }
+          if (msg.source === "ai" && BOOKING_RE.test(text)) setBookHint(true);
         },
         onModeChange: (prop: { mode: "speaking" | "listening" }) => {
           if (!elConvRef.current) return;
           setState(prop.mode === "speaking" ? "speaking" : "listening");
           if (prop.mode === "listening") setCaption("");
         },
-        onStatusChange: (prop: { status: "connected" | "disconnected" | "connecting" | "disconnecting" }) => {
+        onStatusChange: (prop: {
+          status: "connected" | "disconnected" | "connecting" | "disconnecting";
+        }) => {
           if (prop.status === "disconnected" && elConvRef.current) {
             void endElSession();
             setState("idle");
@@ -363,6 +383,11 @@ export default function VoiceAgent() {
     }
     try {
       window.speechSynthesis?.cancel();
+    } catch {}
+    // pause mic recognition while Sana speaks (prevents echo/barge-in feedback)
+    try {
+      recRef.current?.abort();
+      recRef.current = null;
     } catch {}
   }, []);
 
@@ -456,6 +481,19 @@ export default function VoiceAgent() {
       if (runId === runIdRef.current) {
         setState(elConvRef.current ? "listening" : "idle");
         setCaption("");
+        // hands-free (legacy voice mode only): resume the mic after Sana finishes;
+        // never while a premium session is live (the SDK owns the mic then)
+        if (!elConvRef.current && premiumFailedRef.current && voiceInputOkRef.current) {
+          setTimeout(() => {
+            if (
+              runId === runIdRef.current &&
+              stateRef.current === "listening" &&
+              !recRef.current
+            ) {
+              startSRRef.current?.();
+            }
+          }, 900);
+        }
       }
     },
     [playBlob, speakFallback],
@@ -480,11 +518,18 @@ export default function VoiceAgent() {
   );
 
   const pushUserTurn = useCallback((text: string) => {
-    setTurns((t) => [...t, { who: "you", text }]);
-    historyRef.current = [
-      ...historyRef.current,
-      { role: "user" as const, content: text },
-    ].slice(-12);
+    setTurns((t) => {
+      const last = t[t.length - 1];
+      if (last && last.who === "you" && last.text === text) return t;
+      return [...t, { who: "you" as const, text }];
+    });
+    const lastH = historyRef.current[historyRef.current.length - 1];
+    if (!(lastH && lastH.role === "user" && lastH.content === text)) {
+      historyRef.current = [
+        ...historyRef.current,
+        { role: "user" as const, content: text },
+      ].slice(-12);
+    }
   }, []);
 
   const legacySend = useCallback(
@@ -533,12 +578,12 @@ export default function VoiceAgent() {
         }
       }
 
-      // 2) try starting a premium session (voice first; legacy on failure)
+      // 2) try starting a premium session (Reva voice; legacy on failure)
       if (!premiumFailedRef.current) {
         setState("thinking");
         const ok = await startElVoice();
         if (ok && elConvRef.current) {
-          // the session plays the agent's Urdu greeting; forward the question after it
+          // the agent speaks its Urdu greeting; forward the question after it
           setTimeout(() => {
             try {
               elConvRef.current?.sendUserMessage(text);
@@ -556,9 +601,77 @@ export default function VoiceAgent() {
     [endElSession, legacySend, pushUserTurn, startElVoice, stopAll],
   );
 
+  /* ---------- mic (local SpeechRecognition -> premium text-only brain) ---------- */
+
+  const startSR = useCallback(() => {
+    const Ctor = (
+      window as unknown as {
+        SpeechRecognition?: SRCtor;
+        webkitSpeechRecognition?: SRCtor;
+      }
+    ).SpeechRecognition ||
+    (window as unknown as { webkitSpeechRecognition?: SRCtor }).webkitSpeechRecognition;
+
+    if (!Ctor) {
+      setVoiceInputOk(false);
+      setMicHint("Is browser mein voice input support nahi — text se poochein.");
+      return;
+    }
+    if (recRef.current) return;
+
+    const rec = new Ctor();
+    rec.lang = inputLangRef.current === "ur" ? "ur-PK" : "en-US";
+    rec.interimResults = true;
+    rec.continuous = true;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e: SRResultEvent) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i += 1) {
+        const r = e.results[i];
+        if (r.isFinal) {
+          const finalText = r[0].transcript.trim();
+          if (finalText) {
+            void sendMessage(finalText);
+            return;
+          }
+        } else {
+          interim += r[0].transcript;
+        }
+      }
+      setInterim(interim);
+    };
+    rec.onerror = (e: SRErrorEvent) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setVoiceInputOk(false);
+        setMicHint(MIC_DENIED);
+        stopVisual();
+        setState("idle");
+      }
+      // no-speech / audio-capture hiccups: recognition cycles via onend
+    };
+    rec.onend = () => {
+      recRef.current = null;
+      setInterim("");
+      if (stateRef.current === "listening" && voiceInputOkRef.current) {
+        // keep the mic alive while the session is open
+        setTimeout(() => {
+          if (stateRef.current === "listening" && !recRef.current) startSRRef.current?.();
+        }, 350);
+      }
+    };
+    try {
+      rec.start();
+      recRef.current = rec;
+    } catch {
+      recRef.current = null;
+    }
+  }, [sendMessage, stopVisual]);
+  startSRRef.current = startSR;
+
   /* ---------- mic + visualizer (legacy listening path) ---------- */
 
   const startVisual = useCallback(async () => {
+    if (ctxRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -588,7 +701,8 @@ export default function VoiceAgent() {
 
   const stopListening = useCallback(() => {
     try {
-      recRef.current?.stop();
+      recRef.current?.abort();
+      recRef.current = null;
     } catch {}
     stopVisual();
     if (stateRef.current === "listening") setState("idle");
@@ -603,16 +717,6 @@ export default function VoiceAgent() {
     ).SpeechRecognition ||
     (window as unknown as { webkitSpeechRecognition?: SRCtor }).webkitSpeechRecognition;
 
-    if (premiumFailedRef.current || !Ctor) {
-      if (!Ctor) {
-        setVoiceInputOk(false);
-        setMicHint("Is browser mein voice input support nahi — text se poochein.");
-      } else {
-        setMicHint(EL_FAILED_HINT);
-      }
-      return;
-    }
-
     stopAll();
     setCaption("");
     setInterim("");
@@ -620,20 +724,25 @@ export default function VoiceAgent() {
     setState("listening");
 
     void (async () => {
-      const ok = await startElVoice();
-      if (!ok) {
-        // mic may be denied or quota hit -> fall back to browser recognition + legacy pipeline
-        stopVisual();
-        setState("idle");
-        if (premiumFailedRef.current) {
-          setMicHint(EL_FAILED_HINT);
-        } else {
-          setVoiceInputOk(false);
-          setMicHint(MIC_DENIED);
-        }
+      // premium path: the session owns the mic (ElevenLabs ASR + Reva voice)
+      if (!premiumFailedRef.current) {
+        const ok = await startElVoice();
+        if (ok) return;
+        await endElSession();
       }
+
+      // premium unavailable (quota/network) -> local speech recognition + legacy pipeline
+      if (!Ctor) {
+        setVoiceInputOk(false);
+        setMicHint("Is browser mein voice input support nahi — text se poochein.");
+        setState("idle");
+        return;
+      }
+      setMicHint(EL_FAILED_HINT);
+      void startVisual();
+      startSR();
     })();
-  }, [startElVoice, stopAll, stopVisual]);
+  }, [endElSession, startElVoice, startSR, startVisual, stopAll]);
 
   const endVoiceSession = useCallback(() => {
     stopAll();
@@ -668,13 +777,11 @@ export default function VoiceAgent() {
 
   const statusText =
     state === "listening"
-      ? premiumMode === "voice"
-        ? "Sun rahi hoon — boliye!"
-        : "Sun rahi hoon..."
+      ? "Sun rahi hoon — boliye!"
       : state === "thinking"
         ? "Soch rahi hoon..."
         : state === "speaking"
-          ? "Jawab de rahi hoon — boliye to beech mein rok doongi"
+          ? "Jawab de rahi hoon — rokne ke liye mic dabayen"
           : "Boliye ya likhiye — jawab awaz mein milega";
 
   const orbStyle = { bottom: "calc(1.15rem + env(safe-area-inset-bottom))", right: "1.15rem" };
