@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioLines, Mic, Send, Sparkles, Square, X } from "lucide-react";
+import { AudioLines, MessageCircle, Mic, Send, Sparkles, Square, X } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* types + constants                                                   */
@@ -20,7 +20,10 @@ interface QueueItem {
 }
 
 const GREETING =
-  "[warm] Assalam-o-alaikum! Main Sana hoon, TK Dent ki voice assistant. Aap awaz se ya type kar ke treatments, timings ya appointment ke baare mein pooch saktay hain.";
+  "[warm] السلام علیکم! میں ثنا ہوں، ٹی کے ڈینٹ کی وائس اسسٹنٹ۔ آپ آواز سے یا لکھ کر ٹریٹمنٹس، اوقات یا اپوائنٹمنٹ کے بارے میں پوچھ سکتے ہیں۔";
+const WHATSAPP_URL =
+  "https://wa.me/923123329479?text=" +
+  encodeURIComponent("Assalam o Alaikum! Main appointment book karna chah raha/chah rahi hoon.");
 const MIC_DENIED =
   "Mic ki permission nahi mili — aap text se bhi pooch saktay hain.";
 
@@ -170,7 +173,7 @@ async function fetchBlob(text: string, lang: Lang, emotion: Emotion): Promise<Bl
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
-    const res = await fetch("/tts?XTransformPort=3030", {
+    const res = await fetch("/api/voice-agent/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, lang, emotion }),
@@ -199,6 +202,7 @@ export default function VoiceAgent() {
   const [draft, setDraft] = useState("");
   const [micHint, setMicHint] = useState("");
   const [voiceInputOk, setVoiceInputOk] = useState(true);
+  const [bookHint, setBookHint] = useState(false);
 
   const historyRef = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const runIdRef = useRef(0);
@@ -375,6 +379,7 @@ export default function VoiceAgent() {
       setCaption("");
       thinkingRef.current = true;
       setState("thinking");
+      setBookHint(false);
       pushUserTurn(text);
 
       try {
@@ -383,8 +388,9 @@ export default function VoiceAgent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messages: historyRef.current }),
         });
-        const data = (await res.json()) as { reply?: string; error?: string };
+        const data = (await res.json()) as { reply?: string; error?: string; booking?: boolean };
         if (!res.ok || !data.reply) throw new Error(data.error ?? "brain failed");
+        if (data.booking) setBookHint(true);
         speakReply(data.reply);
       } catch {
         setMicHint("");
@@ -683,6 +689,19 @@ export default function VoiceAgent() {
           </p>
         )}
       </div>
+
+      {/* booking handoff */}
+      {bookHint && (
+        <a
+          href={WHATSAPP_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mx-3 mb-2 flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-teal to-[#0B6B63] px-4 py-2.5 text-[12px] font-bold text-white shadow-md transition-transform hover:scale-[1.02]"
+        >
+          <MessageCircle className="h-4 w-4" aria-hidden="true" />
+          WhatsApp par appointment book karein
+        </a>
+      )}
 
       {/* controls */}
       <div className="flex items-center gap-2 px-3 py-3">
