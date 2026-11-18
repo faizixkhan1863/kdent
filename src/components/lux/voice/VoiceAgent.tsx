@@ -1105,6 +1105,12 @@ export default function VoiceAgent() {
     stopLegacyAudio();
     stopListening();
     void endElSession();
+    // fresh start on next open — purge stale booking draft/history
+    // (bug: Sana resumed "booking kara deti hoon" from a previous session)
+    historyRef.current = [];
+    draftRef.current = {};
+    setUserLines([]);
+    setBooking(null);
     setOpen(false);
   }, [endElSession, stopLegacyAudio, stopListening]);
 
