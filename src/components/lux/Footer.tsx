@@ -112,6 +112,14 @@ export default function Footer() {
           </span>
           <span>Dr. Tanveer Khokhar · PMDC 717175-03-D</span>
         </div>
+        <div className="mt-4">
+          <a
+            href="/admin"
+            className="text-[10px] uppercase tracking-[0.22em] text-[rgba(222,242,238,0.28)] transition-colors hover:text-mint-glow"
+          >
+            Staff Login
+          </a>
+        </div>
       </div>
     </footer>
   );

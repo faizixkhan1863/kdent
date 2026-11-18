@@ -1,12 +1,16 @@
 /**
- * TK Dent — Voice Agent TTS (Vercel-compatible serverless route)
+ * TK Dent — Voice Agent TTS (fallback pipeline, Vercel-compatible)
  * POST /api/voice-agent/tts  { text, lang: "ur"|"en", emotion? }  -> audio/mpeg
  *
- * Primary engine: msedge-tts (pure JS WebSocket -> Microsoft neural voices).
- *   ur -> ur-IN-GulNeural               (female Urdu — clearest in ASR round-trip
- *                                        vs ur-PK-UzmaNeural / Ava / Emma candidates)
- *   en -> en-US-AvaMultilingualNeural   (female multilingual; replaces male Andrew)
- * English fallback: platform TTS (z-ai SDK) if the primary engine fails.
+ * Engine chain (seamless — listener hears one continuous voice):
+ *   1. ElevenLabs "Reva" (voice o85TqPN3F4P7dWae2paA, "Sana — Urdu
+ *      Receptionist") — used when ELEVENLABS_API_KEYS / ELEVENLABS_API_KEY
+ *      is present. Keys rotate round-robin; a key that is out of credits,
+ *      unpaid or rate-limited is skipped automatically so the voice never
+ *      audibly changes mid-conversation.
+ *   2. msedge-tts  ur -> ur-IN-GulNeural (female Urdu)
+ *                  en -> en-US-AvaMultilingualNeural (female multilingual)
+ *   3. English-only platform TTS (z-ai SDK) as a last resort.
  * Client (VoiceAgent.tsx) further falls back to browser speechSynthesis.
  */
 
@@ -18,6 +22,9 @@ export const maxDuration = 30;
 /* ------------------------------------------------------------------ */
 /* voice + prosody config                                               */
 /* ------------------------------------------------------------------ */
+
+const EL_VOICE_ID = "o85TqPN3F4P7dWae2paA"; // Reva — "Sana — Urdu Receptionist" (shared library voice)
+const EL_MODEL = process.env.ELEVENLABS_TTS_MODEL ?? "eleven_flash_v2_5";
 
 const VOICES: Record<string, string> = {
   ur: "ur-IN-GulNeural",
@@ -37,6 +44,8 @@ const EMO_TAG = /\[(warm|reassuring|excited|neutral|sorry)\]/gi;
 function cleanText(raw: string): string {
   return raw
     .replace(EMO_TAG, "")
+    .replace(/\[\[\s*SET[\s\S]*?\]\]/gi, "")
+    .replace(/\[\[\s*CONFIRM\s*\]\]/gi, "")
     .replace(/<<\s*BOOK\s*>>/gi, "")
     .replace(/[*_#`<>]/g, "")
     .replace(/https?:\/\/\S+/g, "")
@@ -44,6 +53,27 @@ function cleanText(raw: string): string {
     .trim()
     .slice(0, 900);
 }
+
+/** ElevenLabs keys: comma list preferred, numbered fallbacks supported. */
+function elevenKeys(): string[] {
+  const keys: string[] = [];
+  const push = (v: string | undefined) => {
+    if (!v) return;
+    for (const k of v.split(",")) {
+      const t = k.trim();
+      if (t && !keys.includes(t)) keys.push(t);
+    }
+  };
+  push(process.env.ELEVENLABS_API_KEYS);
+  push(process.env.ELEVENLABS_API_KEY);
+  push(process.env.ELEVENLABS_API_KEY_2);
+  push(process.env.ELEVENLABS_API_KEY_3);
+  push(process.env.ELEVENLABS_API_KEY_4);
+  return keys;
+}
+
+/** Round-robin start index so credit usage stays even across accounts. */
+let keyCursor = 0;
 
 /* ------------------------------------------------------------------ */
 /* msedge-tts synth with retries                                        */
@@ -79,6 +109,63 @@ async function synthMsEdge(text: string, lang: string, emotion: string): Promise
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("msedge-tts failed");
+}
+
+/* ------------------------------------------------------------------ */
+/* ElevenLabs synth with key rotation                                   */
+/* ------------------------------------------------------------------ */
+
+/** Errors that mean "this key/plan can't serve right now" -> try next key. */
+function isKeyFailure(status: number, detail: string): boolean {
+  if (status === 401 || status === 402 || status === 403 || status === 429) return true;
+  if (status === 409 && /voice_limit|concurrent/i.test(detail)) return true;
+  if (status >= 500) return true;
+  return /quota|credit|plan|unauthorized/i.test(detail);
+}
+
+async function synthElevenLabs(text: string): Promise<Buffer | null> {
+  const keys = elevenKeys();
+  if (keys.length === 0) return null;
+
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[(keyCursor + i) % keys.length];
+    try {
+      const res = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE_ID}?output_format=mp3_44100_128&optimize_streaming_latency=4`,
+        {
+          method: "POST",
+          headers: {
+            "xi-api-key": key,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text,
+            model_id: EL_MODEL,
+            voice_settings: { stability: 0.55, similarity_boost: 0.8, style: 0.12, use_speaker_boost: true },
+          }),
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      if (!res.ok) {
+        const detail = (await res.text().catch(() => "")).slice(0, 200);
+        if (isKeyFailure(res.status, detail)) {
+          console.warn(`[voice-agent/tts] elevenlabs key #${(keyCursor + i) % keys.length + 1} unusable (${res.status}) -> next`);
+          continue;
+        }
+        throw new Error(`elevenlabs ${res.status}: ${detail}`);
+      }
+      const buf = Buffer.from(new Uint8Array(await res.arrayBuffer()));
+      if (buf.length < 500) throw new Error(`elevenlabs tiny audio ${buf.length}`);
+      keyCursor = (keyCursor + i + 1) % keys.length; // next request uses the following key
+      return buf;
+    } catch (err) {
+      console.warn(
+        "[voice-agent/tts] elevenlabs attempt failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return null; // all keys exhausted -> caller falls through to msedge
 }
 
 /* ------------------------------------------------------------------ */
@@ -146,30 +233,46 @@ export async function POST(req: NextRequest) {
 
   const cached = cacheGet(key);
   if (cached) {
-    return new Response(cached, {
+    return new Response(new Uint8Array(cached), {
       status: 200,
       headers: { "Content-Type": "audio/mpeg", ...NO_STORE },
     });
   }
 
   try {
-    let audio: Buffer;
-    try {
-      audio = await synthMsEdge(text, lang, emotion);
-    } catch (err) {
-      console.warn(
-        `[voice-agent/tts] msedge failed (${lang}/${emotion}), trying platform fallback:`,
-        err instanceof Error ? err.message : err,
-      );
-      if (lang !== "en") throw err; // Urdu: no platform alternative -> client fallback
-      audio = await synthPlatform(text);
+    let audio: Buffer | null = null;
+    let engine = "";
+
+    // 1) ElevenLabs Reva (rotating keys) — only when keys are configured
+    audio = await synthElevenLabs(text);
+    if (audio) engine = "elevenlabs";
+
+    // 2) msedge female neural voices
+    if (!audio) {
+      try {
+        audio = await synthMsEdge(text, lang, emotion);
+        engine = "msedge";
+      } catch (err) {
+        console.warn(
+          `[voice-agent/tts] msedge failed (${lang}/${emotion}), trying platform fallback:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
+
+    // 3) platform TTS — English only
+    if (!audio && lang === "en") {
+      audio = await synthPlatform(text);
+      engine = "platform";
+    }
+
+    if (!audio) throw new Error("all tts engines failed");
 
     cacheSet(key, audio);
     console.log(
-      `[voice-agent/tts] ${lang}/${emotion} ${text.length}ch -> ${audio.length}b in ${Date.now() - started}ms`,
+      `[voice-agent/tts] ${engine} ${lang}/${emotion} ${text.length}ch -> ${audio.length}b in ${Date.now() - started}ms`,
     );
-    return new Response(audio, {
+    return new Response(new Uint8Array(audio), {
       status: 200,
       headers: { "Content-Type": "audio/mpeg", ...NO_STORE },
     });

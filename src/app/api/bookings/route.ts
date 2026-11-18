@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  normalizePhone,
+  isValidPhone,
+  normalizeDateKey,
+  normalizeSlot,
+  freeSlotsFor,
+} from "@/lib/clinic";
+import { getStore } from "@/lib/appointments-store";
 
 const bookingSchema = z.object({
   name: z.string().min(2, "Please enter your full name").max(80),
@@ -12,20 +20,18 @@ const bookingSchema = z.object({
   date: z.string().min(4).max(20),
   timeSlot: z.string().min(2).max(40),
   notes: z.string().max(500).optional().nullable(),
+  type: z.enum(["new", "followup"]).optional(),
+  slotFlexible: z.boolean().optional(),
 });
 
-type BookingPayload = z.infer<typeof bookingSchema>;
-
 /**
- * Serverless-safe booking intake.
+ * Website form booking intake.
  *
- * - Locally (sandbox): the booking is persisted to SQLite via Prisma.
- * - On Vercel: the filesystem is read-only, so SQLite cannot persist.
- *   The request still succeeds — the clinic receives the booking instantly
- *   through the WhatsApp deep link (the clinic's primary channel).
+ * - Persists through the appointment store (Prisma locally, private
+ *   GitHub data repo on Vercel) so it appears in the doctors dashboard.
+ * - Returns a WhatsApp deep-link so the clinic instantly sees the
+ *   request even while the dashboard is not open.
  */
-const memoryBookings: Array<BookingPayload & { id: string; at: string }> = [];
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -39,49 +45,59 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { name, phone, service, date, timeSlot, notes } = parsed.data;
+    const { name, service, notes, type, slotFlexible } = parsed.data;
+    const phone = normalizePhone(parsed.data.phone);
+    if (!isValidPhone(phone)) {
+      return NextResponse.json(
+        { success: false, error: "Please enter a valid phone number" },
+        { status: 400 }
+      );
+    }
+    const date = normalizeDateKey(parsed.data.date);
+    const timeSlot = normalizeSlot(parsed.data.timeSlot);
 
-    // 1) Best-effort persistence — SQLite locally, graceful skip on Vercel.
+    // 1) Persist (best-effort — WhatsApp remains the guaranteed channel).
     let bookingId = `KD${Date.now().toString(36).toUpperCase()}`;
     let persisted = false;
 
-    if (process.env.DATABASE_URL) {
+    const store = getStore();
+    if (store && date && timeSlot) {
       try {
-        const { db } = await import("@/lib/db");
-        const booking = await db.booking.create({
-          data: {
-            name: name.trim(),
-            phone: phone.trim(),
-            service,
-            date,
-            timeSlot,
-            notes: notes?.trim() || null,
-          },
+        const appts = await store.list();
+        const free = freeSlotsFor(appts, date);
+        // Flexible patients: bump to the nearest free slot when theirs is taken.
+        const finalSlot =
+          free.includes(timeSlot) || slotFlexible
+            ? (free.includes(timeSlot) ? timeSlot : (free[0] ?? timeSlot))
+            : timeSlot;
+        const booking = await store.create({
+          name: name.trim(),
+          phone,
+          service,
+          type: type ?? "new",
+          date,
+          timeSlot: finalSlot,
+          notes: notes?.trim() || null,
+          source: "web",
         });
         bookingId = booking.id;
         persisted = true;
       } catch (dbError) {
         console.error(
-          "[BOOKINGS_POST] DB unavailable — continuing via WhatsApp:",
+          "[BOOKINGS_POST] store unavailable — continuing via WhatsApp:",
           dbError
         );
       }
     }
-
-    memoryBookings.unshift({
-      ...parsed.data,
-      id: bookingId,
-      at: new Date().toISOString(),
-    });
-    if (memoryBookings.length > 50) memoryBookings.pop();
 
     // 2) WhatsApp deep-link so the clinic receives the request instantly.
     const waMessage = encodeURIComponent(
       `Assalamualaikum! I would like to book an appointment at TK Dent.\n\n` +
         `Name: ${name}\n` +
         `Service: ${service}\n` +
-        `Preferred Date: ${date}\n` +
-        `Preferred Time: ${timeSlot}\n` +
+        `Preferred Date: ${date ?? parsed.data.date}\n` +
+        `Preferred Time: ${timeSlot ?? parsed.data.timeSlot}\n` +
+        (type === "followup" ? `Visit type: Follow-up\n` : "") +
         (notes ? `Notes: ${notes}\n` : "") +
         `\n(Booking ref: ${bookingId.slice(-6).toUpperCase()})`
     );

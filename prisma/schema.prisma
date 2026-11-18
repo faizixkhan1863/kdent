@@ -1,8 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// TK Dent — Prisma schema
+// Bookings come from three sources: website form, voice agent (Sana),
+// and manual admin edits. Stored in SQLite locally; on Vercel the
+// GitHub data repo (GITHUB_DATA_TOKEN + GITHUB_DATA_REPO) persists them.
 
 generator client {
   provider = "prisma-client-js"
@@ -21,6 +20,12 @@ model Booking {
   date      String
   timeSlot  String
   notes     String?
+  // "new" | "followup"
+  type      String   @default("new")
+  // "pending" | "confirmed" | "completed" | "cancelled"
   status    String   @default("pending")
+  // "web" | "voice-agent" | "admin"
+  source    String   @default("web")
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

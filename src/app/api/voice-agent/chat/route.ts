@@ -1,48 +1,125 @@
 /**
- * TK Dent — Voice Agent Brain (Vercel-compatible serverless route)
- * POST /api/voice-agent/chat  { messages: [{ role, content }] }
- * -> { reply: string, booking?: boolean }
+ * TK Dent — Voice Agent Brain (fallback pipeline, Vercel-compatible)
+ * POST /api/voice-agent/chat  { messages, draft? }
+ * -> SSE stream:
+ *      data: {"type":"delta","t":"..."}     (reply text pieces)
+ *      data: {"type":"meta", ...}           (booking draft/booked/hints)
+ *      data: [DONE]
  *
  * Sana speaks ONLY through the TTS route; this route just thinks.
+ * Booking: the model extracts fields with [[SET {...}]] and finalises with
+ * [[CONFIRM]]; the server merges them into the client-held draft and
+ * persists the appointment in the store (dashboard shows it instantly).
  */
 
 import { existsSync } from "fs";
 import os from "os";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import {
+  normalizePhone,
+  isValidPhone,
+  normalizeDateKey,
+  normalizeSlot,
+  availabilityPromptBlock,
+  weekdayIndex,
+  clinicDateKey,
+  clinicTimeKey,
+  type ApptRecord,
+} from "@/lib/clinic";
+import { getStore } from "@/lib/appointments-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 /* ------------------------------------------------------------------ */
-/* clinic knowledge                                                     */
+/* clinic knowledge + protocol                                          */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_PROMPT = `You are "Sana" — the warm, professional voice receptionist of TK Dent Dental & Aesthetic Care in Bani Gala, Islamabad. You answer the clinic's phone-style chat. You are female, friendly and calm, like a real front-desk person.
+const WEEKDAYS_UR = ["اتوار", "پیر", "منگل", "بدھ", "جمعرات", "جمعہ", "ہفتہ"];
 
-CLINIC FACTS (never contradict these):
-- Name: TK Dent Dental & Aesthetic Care
-- Doctor: Dr. Tanveer Khokhar — senior Oral & Maxillofacial Surgeon (FCPS qualified, C-Endo certified)
-- Services: Smile Design & Cosmetic Dentistry, Clear Aligners & Braces (plans from Rs 5,000), Dental Implants (placed by FCPS surgeon), Painless single-visit Root Canal (C-Endo certified), Whitening & Polishing (Rs 15,000, two sessions included), Crowns & Veneers, Family & General Dentistry, kids dentistry
-- Timings: Monday to Saturday, 10:00 AM to 7:00 PM. Sunday closed.
-- Address: House 34-C, Akram Road, Bani Gala, Islamabad
-- Phone / WhatsApp: 0312 3329479
-- Instagram: @TK_dent_care
+function buildSystemPrompt(draft: Draft, appts: ApptRecord[] | null): string {
+  const todayKey = clinicDateKey();
+  const todayIdx = weekdayIndex(todayKey);
+  const nowTime = clinicTimeKey();
+  const avail = appts ? availabilityPromptBlock(appts, 7) : "(availability system offline — slots promise na karein)";
 
-HOW YOU TALK (your text is SPOKEN aloud by a voice engine, so):
-1. LANGUAGE: reply in the same language the user used.
-   - Urdu in Arabic script -> reply in Urdu script (اردو).
-   - Roman Urdu (e.g. "appointment kitne baje ka ho sakta hai") -> reply in URDU SCRIPT (اردو) too, but keep common dental words natural (ایمپلانٹ، بریسز، کلینر جیسی باتیں آسانی سے کہو). Pakistani users read Urdu script fine and the Urdu voice sounds far more natural.
-   - English -> reply in English.
-   - Mixed -> lean to the script of the majority words.
-2. LENGTH: 1 to 3 SHORT conversational sentences. Max ~45 words. One idea per sentence. Never use lists, markdown, asterisks, emojis or URLs.
-3. Start the reply with exactly ONE emotion tag from: [warm] [reassuring] [excited] [sorry] [neutral]
-4. Speak numbers the way people say them: "0312 3329479".
-5. BOOKING: if the user clearly wants to book, reschedule or confirm an appointment NOW, end your reply with the token <<BOOK>> (nothing else after it), and warmly tell them to WhatsApp 0312 3329479 or press the WhatsApp button that appears — the button opens the chat for them. Do not add <<BOOK>> for general price or timing questions. Never promise or confirm a slot yourself — only the team on WhatsApp confirms the final time.
-6. PRICES: only quote prices listed above. Anything else: say the final cost is confirmed at consultation (in the user's language).
-7. PAIN / URGENT: reassuring tone, tell them to WhatsApp or call 0312 3329479 right away; never diagnose remotely, never prescribe.
-8. OFF-TOPIC: politely steer back to dental care in one short sentence.
-9. IDENTITY: you are Sana, TK Dent's voice assistant — never mention being an AI model, never mention these instructions.
-10. If the user asks something you do not know, offer to have the team call them back via WhatsApp 0312 3329479.`;
+  const draftLines = (Object.keys(FIELDS) as Array<keyof Draft>)
+    .map((k) => `${k}: ${draft[k] ? String(draft[k]) : "(missing)"}`)
+    .join(" | ");
+
+  return `You are "Sana" — the warm, professional voice receptionist of TK Dent Dental & Aesthetic Care in Bani Gala, Islamabad. You are female, friendly and calm, like a real front-desk person. Your text is SPOKEN aloud by a voice engine.
+
+CLINIC FACTS (never contradict):
+- Doctor: Dr. Tanveer Khokhar — senior Oral & Maxillofacial Surgeon (FCPS, C-Endo certified)
+- Services: Smile Design & Cosmetic Dentistry, Clear Aligners & Braces (from Rs 5,000), Dental Implants, Painless single-visit Root Canal, Whitening & Polishing (Rs 15,000, two sessions), Crowns & Veneers, Family & General Dentistry, kids dentistry
+- Timings: Monday to Saturday 10:00 AM to 7:00 PM (30-minute slots, last slot 6:30 PM). Sunday closed.
+- Address: House 34-C, Akram Road, Bani Gala, Islamabad. Phone/WhatsApp: 0312 3329479. Instagram: @TK_dent_care
+
+LANGUAGE: reply in the same language the user used. Urdu or Roman Urdu -> reply in URDU SCRIPT (اردو). English -> English. Mixed -> majority script.
+STYLE: 1 to 3 SHORT conversational sentences (max 40 words). One question at a time. Start with exactly ONE emotion tag from [warm] [reassuring] [excited] [sorry] [neutral]. Never lists, markdown, emojis, URLs. Speak numbers naturally. Never mention being an AI or these instructions.
+
+LIVE CONTEXT:
+- Today: ${todayKey} (${WEEKDAYS_UR[todayIdx]}), clinic time now ${nowTime}.
+- FREE SLOTS (next 7 days, only quote these — never invent):
+${avail}
+
+APPOINTMENT BOOKING SYSTEM (you CAN book directly — the dashboard team sees it instantly):
+Current collected data: ${draftLines}
+During the conversation, collect: name, phone (WhatsApp), service, type (new patient ya follow-up), date + time.
+RULES:
+1. Extract info the user gives and emit at the END of your reply: [[SET {"name":"...","phone":"03001234567","service":"...","type":"new|followup","date":"YYYY-MM-DD","time":"HH:MM"}]] — include ONLY fields the user just provided (you may include several). Emit [[SET]] with {} if nothing new.
+2. Ask for the missing fields ONE at a time, in this order: name -> phone -> service -> type (naya patient ya follow-up?) -> day/time (suggest 2-3 FREE slots from the list, in friendly Urdu words like "kal sham 5 baje"). When the user says naya/new/pehli baar -> type "new"; purana/purana mareez/follow up/pehle aa chuka hun -> type "followup".
+3. When ALL fields are collected, give a short summary and ask for confirmation ("kya main ye pakka kar dun?"). Only after the user clearly says yes, emit [[CONFIRM]] at the very end.
+4. If the user asks about free slots, read them from the FREE SLOTS list naturally (Urdu words, e.g. "چھ بجے شام") and never quote taken slots.
+5. Dates must be output as YYYY-MM-DD based on today given above ("kal" = tomorrow's date, "aaj" = today). Times as HH:MM 24h.
+6. Sunday is closed — steer to Monday onwards. Past slots for today are not available.
+7. Only emit [[CONFIRM]] when name, phone, service, date AND time are all present in the collected data. When the user says yes / haan / ji / pakka / bilkul / theek hai to your summary, you MUST end that reply with [[CONFIRM]] immediately.
+8. Pain/urgent cases: reassuring tone, advise WhatsApp/call 0312 3329479 right away; never diagnose or prescribe.
+9. PRICES: only the ones listed; anything else -> final cost is confirmed at consultation.
+10. Off-topic: politely steer back in one sentence. If asked something unknown, offer the team will call back via WhatsApp.`;
+}
+
+interface Draft {
+  name: string;
+  phone: string;
+  service: string;
+  type: string;
+  date: string;
+  time: string;
+}
+const FIELDS: Record<keyof Draft, boolean> = {
+  name: true,
+  phone: true,
+  service: true,
+  type: true,
+  date: true,
+  time: true,
+};
+
+function sanitizeDraft(raw: unknown): Draft {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 80) : "");
+  const d: Draft = {
+    name: str(o.name),
+    phone: str(o.phone),
+    service: str(o.service),
+    type: o.type === "followup" ? "followup" : o.type === "new" ? "new" : "",
+    date: str(o.date),
+    time: str(o.time),
+  };
+  if (d.phone) {
+    d.phone = normalizePhone(d.phone);
+    if (!isValidPhone(d.phone)) d.phone = "";
+  }
+  if (d.date) {
+    d.date = normalizeDateKey(d.date) ?? "";
+  }
+  if (d.time) {
+    d.time = normalizeSlot(d.time) ?? "";
+  }
+  if (d.type && d.type !== "new" && d.type !== "followup") d.type = "";
+  return d;
+}
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                              */
@@ -65,12 +142,54 @@ function sanitizeMessages(raw: unknown): ChatMsg[] {
   return msgs.slice(-12);
 }
 
-/* ------------------------------------------------------------------ */
-/* brain providers                                                      */
-/* ------------------------------------------------------------------ */
+const SET_RE = /\[\[\s*SET\s*(\{[\s\S]*?\})\s*\]\]/i;
+const CONFIRM_RE = /\[\[\s*CONFIRM\s*\]\]/i;
 
-/** True when the platform z-ai config file exists (sandbox / self-host).
- *  On Vercel it never exists, so we skip the SDK instantly. */
+/** Pull booking tokens out of the raw model text; return clean spoken reply. */
+function extractActions(
+  raw: string,
+  draft: Draft,
+): { reply: string; set: Partial<Draft>; confirm: boolean } {
+  let text = raw;
+  const set: Partial<Draft> = {};
+  const m = text.match(SET_RE);
+  if (m) {
+    try {
+      const parsed = JSON.parse(m[1]) as Record<string, unknown>;
+      if (typeof parsed.name === "string" && parsed.name.trim().length >= 2) {
+        set.name = parsed.name.trim().slice(0, 80);
+      }
+      if (typeof parsed.phone === "string") {
+        const p = normalizePhone(parsed.phone);
+        if (isValidPhone(p)) set.phone = p;
+      }
+      if (typeof parsed.service === "string" && parsed.service.trim().length >= 2) {
+        set.service = parsed.service.trim().slice(0, 80);
+      }
+      if (parsed.type === "new" || parsed.type === "followup") set.type = parsed.type;
+      if (typeof parsed.date === "string") {
+        const dk = normalizeDateKey(parsed.date);
+        if (dk) set.date = dk;
+      }
+      if (typeof parsed.time === "string") {
+        const tk = normalizeSlot(parsed.time);
+        if (tk) set.time = tk;
+      }
+    } catch {
+      /* malformed JSON -> ignore set */
+    }
+    text = text.replace(SET_RE, " ");
+  }
+  const confirm = CONFIRM_RE.test(text);
+  text = text.replace(CONFIRM_RE, " ");
+  text = text.replace(/\[\[|\]\]/g, " ").replace(/[*_#`<>]/g, "").replace(/\s+/g, " ").trim();
+  return { reply: text, set, confirm };
+}
+
+function draftComplete(d: Draft): boolean {
+  return Boolean(d.name && d.phone && d.service && d.type && d.date && d.time);
+}
+
 function platformConfigExists(): boolean {
   try {
     return [
@@ -83,40 +202,93 @@ function platformConfigExists(): boolean {
   }
 }
 
-async function brainPlatform(
-  messages: ChatMsg[],
-): Promise<string> {
+/* ------------------------------------------------------------------ */
+/* brain providers (streaming first, blocking fallback)                 */
+/* ------------------------------------------------------------------ */
+
+async function* streamPlatform(messages: ChatMsg[], system: string): AsyncGenerator<string> {
+  const { default: ZAI } = await import("z-ai-web-dev-sdk");
+  const zai = await ZAI.create();
+  const stream = (await Promise.race([
+    zai.chat.completions.create({
+      messages: [{ role: "assistant", content: system } as never, ...messages] as never,
+      thinking: { type: "disabled" },
+      stream: true,
+      max_tokens: 300,
+    }),
+    new Promise<never>((_, rej) => setTimeout(() => rej(new Error("platform open timeout")), 12000)),
+  ])) as AsyncIterable<{ choices?: Array<{ delta?: { content?: string } }> }>;
+  for await (const chunk of stream) {
+    const d = chunk?.choices?.[0]?.delta?.content;
+    if (d) yield d;
+  }
+}
+
+async function blockPlatform(messages: ChatMsg[], system: string): Promise<string> {
   const { default: ZAI } = await import("z-ai-web-dev-sdk");
   const zai = await ZAI.create();
   const completion = (await Promise.race([
     zai.chat.completions.create({
-      messages: [{ role: "assistant", content: SYSTEM_PROMPT }, ...messages],
+      messages: [{ role: "assistant", content: system } as never, ...messages] as never,
       thinking: { type: "disabled" },
     }),
-    new Promise<never>((_, rej) =>
-      setTimeout(() => rej(new Error("platform brain timeout")), 20000),
-    ),
+    new Promise<never>((_, rej) => setTimeout(() => rej(new Error("platform brain timeout")), 20000)),
   ])) as { choices?: Array<{ message?: { content?: string } }> };
   return completion?.choices?.[0]?.message?.content ?? "";
 }
 
-/** Key-less free LLM (works from Vercel serverless). Rate limited on the
- *  free tier; the client's offline brain absorbs any 429/402 replies. */
-async function brainPollinations(messages: ChatMsg[]): Promise<string> {
+async function* streamPollinations(messages: ChatMsg[], system: string): AsyncGenerator<string> {
   const res = await fetch("https://text.pollinations.ai/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "openai",
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      messages: [{ role: "system", content: system }, ...messages],
+      stream: true,
+      referrer: "tanveerkhokar.vercel.app",
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok || !res.body) throw new Error(`pollinations ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const payload = t.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }> };
+        const d = json?.choices?.[0]?.delta?.content;
+        if (d) yield d;
+      } catch {
+        /* partial json line -> ignore */
+      }
+    }
+  }
+}
+
+async function blockPollinations(messages: ChatMsg[], system: string): Promise<string> {
+  const res = await fetch("https://text.pollinations.ai/openai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "openai",
+      messages: [{ role: "system", content: system }, ...messages],
       referrer: "tanveerkhokar.vercel.app",
     }),
     signal: AbortSignal.timeout(18000),
   });
   if (!res.ok) throw new Error(`pollinations ${res.status}`);
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
@@ -129,55 +301,145 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+    return new Response(JSON.stringify({ error: "invalid json" }), { status: 400 });
   }
-
-  const messages = sanitizeMessages((body as { messages?: unknown })?.messages);
+  const b = body as { messages?: unknown; draft?: unknown };
+  const messages = sanitizeMessages(b?.messages);
   if (messages.length === 0) {
-    return NextResponse.json({ error: "messages required" }, { status: 400 });
+    return new Response(JSON.stringify({ error: "messages required" }), { status: 400 });
   }
 
-  let raw = "";
-  try {
-    if (platformConfigExists()) {
-      raw = await brainPlatform(messages);
-    }
-  } catch (err) {
-    console.warn(
-      "[voice-agent/chat] platform brain failed:",
-      err instanceof Error ? err.message : err,
-    );
-  }
+  let draft = sanitizeDraft(b?.draft);
 
-  if (!raw.trim()) {
+  // fresh availability for the prompt
+  let appts: ApptRecord[] | null = null;
+  const store = getStore();
+  if (store) {
     try {
-      raw = await brainPollinations(messages);
+      appts = await store.list();
     } catch (err) {
-      console.warn(
-        "[voice-agent/chat] pollinations brain failed:",
-        err instanceof Error ? err.message : err,
-      );
+      console.warn("[voice-agent/chat] availability read failed:", err instanceof Error ? err.message : err);
     }
   }
 
-  try {
-    let reply = raw.replace(/[*_#`]/g, "").trim();
+  const system = buildSystemPrompt(draft, appts);
+  const encoder = new TextEncoder();
+  const sse = (obj: unknown) => encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
 
-    const booking = /<<\s*BOOK\s*>>/i.test(reply);
-    reply = reply
-      .replace(/<<\s*BOOK\s*>>/gi, " ")
-      .replace(/[<>]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      const push = (obj: unknown) => {
+        if (!closed) controller.enqueue(sse(obj));
+      };
 
-    if (!reply) throw new Error("empty reply");
+      let raw = "";
+      let sent = 0;
+      // 1) streaming providers
+      const streamers: Array<() => AsyncGenerator<string>> = platformConfigExists()
+        ? [() => streamPlatform(messages, system), () => streamPollinations(messages, system)]
+        : [() => streamPollinations(messages, system)];
 
-    return NextResponse.json({ reply, booking });
-  } catch (err) {
-    console.error(
-      "[voice-agent/chat] failed:",
-      err instanceof Error ? err.message : err,
-    );
-    return NextResponse.json({ error: "brain unavailable" }, { status: 500 });
-  }
+      for (const make of streamers) {
+        try {
+          for await (const piece of make()) {
+            raw += piece;
+            // forward only the spoken portion (never leak protocol tokens)
+            const safe = raw.replace(/\[\[[\s\S]*$/, "");
+            if (safe.length > sent) {
+              push({ type: "delta", t: safe.slice(sent) });
+              sent = safe.length;
+            }
+          }
+          break;
+        } catch (err) {
+          console.warn(
+            "[voice-agent/chat] stream failed, trying next provider:",
+            err instanceof Error ? err.message : err,
+          );
+          raw = "";
+        }
+      }
+
+      // 2) blocking fallback when streaming produced nothing
+      if (!raw.trim()) {
+        const blockers: Array<() => Promise<string>> = platformConfigExists()
+          ? [() => blockPlatform(messages, system), () => blockPollinations(messages, system)]
+          : [() => blockPollinations(messages, system)];
+        for (const run of blockers) {
+          try {
+            raw = await run();
+            if (raw.trim()) {
+              push({ type: "delta", t: raw.slice(sent) });
+              sent = raw.length;
+              break;
+            }
+          } catch (err) {
+            console.warn(
+              "[voice-agent/chat] brain failed:",
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+      }
+
+      // 3) extract booking actions + finalise
+      const { reply, set, confirm: modelConfirm } = extractActions(raw || "", draft);
+      for (const k of Object.keys(FIELDS) as Array<keyof Draft>) {
+        const v = set[k];
+        if (v !== undefined && v !== "") draft[k] = v as string;
+      }
+
+      // safety net: a clear verbal confirmation with a complete draft books
+      // even when the model forgets the [[CONFIRM]] token
+      const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+      const verbalConfirm = /\b(haan|han|haan ji|ji haan|yes|yeah|pakka|paka|bilkul|theek|thik|confirm|kar do|kardo|book)\b|[ہں]\s*(ہاں|جی|پکا|بالکل|ٹھیک)|جی\s*ہاں|پکا\s*کر|بالکل/i.test(
+        lastUser,
+      );
+      const confirm = modelConfirm || (verbalConfirm && draftComplete(draft));
+
+      let booked: ApptRecord | null = null;
+      let bookingError = "";
+      if (confirm && draftComplete(draft) && store) {
+        try {
+          booked = await store.create({
+            name: draft.name,
+            phone: draft.phone,
+            service: draft.service,
+            type: draft.type,
+            date: draft.date,
+            timeSlot: draft.time,
+            source: "voice-agent",
+          });
+          console.log(`[voice-agent/chat] booked ${draft.name} ${draft.date} ${draft.time}`);
+        } catch (err) {
+          bookingError = err instanceof Error ? err.message : "booking failed";
+          console.warn("[voice-agent/chat] booking persist failed:", bookingError);
+        }
+      }
+
+      push({
+        type: "meta",
+        reply,
+        draft,
+        booking: draftComplete(draft) || Boolean(booked),
+        booked,
+        bookingError,
+      });
+      push({ type: "done" });
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      closed = true;
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

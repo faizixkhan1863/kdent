@@ -1,7 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioLines, MessageCircle, Mic, Send, Sparkles, Square, X } from "lucide-react";
+import {
+  AudioLines,
+  BadgeCheck,
+  CalendarDays,
+  Clock,
+  Loader2,
+  MessageCircle,
+  Mic,
+  Send,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* types + constants                                                   */
@@ -10,32 +22,42 @@ import { AudioLines, MessageCircle, Mic, Send, Sparkles, Square, X } from "lucid
 type AgentState = "idle" | "listening" | "thinking" | "speaking";
 type Lang = "ur" | "en";
 type Emotion = "neutral" | "warm" | "reassuring" | "excited" | "sorry";
-interface Turn {
-  who: "you" | "sana";
-  text: string;
-}
 interface QueueItem {
   text: string;
   emotion: Emotion;
 }
+interface DraftFields {
+  name?: string;
+  phone?: string;
+  service?: string;
+  type?: string;
+  date?: string;
+  time?: string;
+}
+type BookingView =
+  | { kind: "collecting"; fields: DraftFields }
+  | { kind: "booked"; appt: { name: string; service: string; type: string; date: string; time: string } }
+  | { kind: "failed"; reason?: string };
 
-const EL_AGENT_ID = "agent_7801m7qwj5qke8jr2vfnd8svng6x"; // Sana — ElevenLabs ConvAI (public agent)
+const DEFAULT_AGENTS = ["agent_7801m7qwj5qke8jr2vfnd8svng6x"]; // Sana — ElevenLabs ConvAI (public agent)
 
 const GREETING =
   "[warm] السلام علیکم! میں ثنا ہوں، ٹی کے ڈینٹ کی وائس اسسٹنٹ۔ آپ آواز سے یا لکھ کر ٹریٹمنٹس، اوقات یا اپوائنٹمنٹ کے بارے میں پوچھ سکتے ہیں۔";
 const WHATSAPP_URL =
   "https://wa.me/923123329479?text=" +
   encodeURIComponent("Assalam o Alaikum! Main appointment book karna chah raha/chah rahi hoon.");
-const MIC_DENIED =
-  "Mic ki permission nahi mili — aap text se bhi pooch saktay hain.";
-const EL_FAILED_HINT =
-  "Premium voice busy hai — offline mode chal raha hai.";
+const MIC_DENIED = "Mic ki permission nahi mili — aap text se bhi pooch saktay hain.";
+const EL_FAILED_HINT = "Premium voice busy hai — offline mode chal raha hai.";
 
 const EMOTION_RE = /^\s*\[(warm|reassuring|excited|neutral|sorry)\]/i;
 const EMO_LIST: Emotion[] = ["warm", "reassuring", "excited", "neutral", "sorry"];
-/** booking intent in an agent reply -> surface the WhatsApp handoff chip */
-const BOOKING_RE =
-  /\b(book|booking|booked|appointment|appointments|reserve)\b|اپوائنٹمنٹ|بکروانا|بک کر|بک رہا|بک جا/i;
+
+/* fast end-of-speech + instant barge-in tuning (legacy pipeline) */
+const SILENCE_FRAMES = 42; // ~700ms of quiet -> submit immediately
+const SPEAK_RMS = 0.085;
+const BARGE_RMS = 0.21;
+const BARGE_FRAMES = 16; // ~270ms sustained speech interrupts Sana
+const BARGE_GRACE_MS = 900;
 
 /* minimal SpeechRecognition typings (Safari-safe, no lookbehind regex) */
 interface SRResultEvent {
@@ -93,26 +115,71 @@ function splitSentences(text: string): string[] {
       merged.push(part.slice(0, 320));
     }
   }
-  return merged.slice(0, 6);
-}
-
-function parseReply(reply: string): { items: QueueItem[]; plain: string } {
-  const match = reply.match(EMOTION_RE);
-  const emotion = (match && EMO_LIST.includes(match[1] as Emotion) ? match[1] : "neutral") as Emotion;
-  const plain = reply.replace(EMOTION_RE, "").trim();
-  const items = splitSentences(plain).map((text) => ({ text, emotion }));
-  return { items, plain };
+  return merged.slice(0, 8);
 }
 
 function detectLang(text: string): Lang {
   return /[\u0600-\u06FF]/.test(text) ? "ur" : "en";
 }
 
-/**
- * Offline fallback brain — keeps the voice agent useful even when the
- * LLM route or TTS service is unreachable (e.g. static hosting).
- * Mirrors the clinic facts and the caller's language script.
- */
+async function fetchBlob(text: string, lang: Lang, emotion: Emotion): Promise<Blob> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch("/api/voice-agent/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang, emotion }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`tts ${res.status}`);
+    const blob = await res.blob();
+    if (blob.size < 500) throw new Error("tiny audio");
+    return blob;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Live free-slot summary for Sana's check_slots tool. */
+async function checkSlotsTool(params?: { date?: string }): Promise<string> {
+  try {
+    const q = params?.date ? `?date=${encodeURIComponent(params.date)}` : "?days=7";
+    const res = await fetch(`/api/voice-agent/availability${q}`);
+    const j = (await res.json()) as {
+      ok?: boolean;
+      date?: string;
+      closed?: boolean;
+      slots?: Array<{ time: string; booked: boolean }>;
+      days?: Array<{ date: string; closed: boolean; slots: Array<{ time: string; booked: boolean }> }>;
+      error?: string;
+    };
+    if (!j.ok) return JSON.stringify({ ok: false, error: "scheduler offline — WhatsApp 0312 3329479 par poochein" });
+    if (j.closed) return JSON.stringify({ ok: true, closed: true, message: "Sunday clinic band hai — Monday se slots available hain" });
+    if (j.slots) {
+      const free = j.slots.filter((s) => !s.booked).map((s) => s.time);
+      return JSON.stringify({ ok: true, date: j.date, freeSlots: free, count: free.length });
+    }
+    if (j.days) {
+      const summary = j.days.map((d) => ({
+        date: d.date,
+        closed: d.closed,
+        freeSlots: d.closed ? [] : d.slots.filter((s) => !s.booked).map((s) => s.time),
+      }));
+      return JSON.stringify({ ok: true, days: summary });
+    }
+    return JSON.stringify({ ok: false, error: "scheduler gave no data" });
+  } catch {
+    return JSON.stringify({ ok: false, error: "network error — WhatsApp 0312 3329479 par poochein" });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* offline brain (kept for total-network-failure mode)                 */
+/* ------------------------------------------------------------------ */
+
+let whatsHintSetter: (() => void) | null = null;
+
 function localBrain(question: string): string {
   const t = question.toLowerCase();
   const ur = /[\u0600-\u06FF]/.test(question);
@@ -123,7 +190,7 @@ function localBrain(question: string): string {
       ? "[warm] ہم پیر سے ہفتہ، صبح دس بجے سے شام سات بجے تک کھلے ہیں۔ اتوار بند رہتا ہے۔"
       : "[warm] We are open Monday to Saturday, 10 AM to 7 PM. Sunday is closed.";
   }
-  if (has("where", "address", "location", "pata", "address", "کہاں", "پتہ", "لوکیشن")) {
+  if (has("where", "address", "location", "pata", "کہاں", "پتہ", "لوکیشن")) {
     return ur
       ? "[warm] TK Dent Bani Gala، اسلام آباد میں House 34-C، Akram Road پر ہے۔ آپ گوگل میپ سے آسانی سے پہنچ سکتے ہیں۔"
       : "[warm] We are at House 34-C, Akram Road, Bani Gala, Islamabad. Directions are on the website footer.";
@@ -134,7 +201,7 @@ function localBrain(question: string): string {
       : "[warm] Dr. Tanveer Khokhar is our senior oral and maxillofacial surgeon — FCPS qualified and C-Endo certified. He personally plans every case.";
   }
   if (has("book", "appointment", "reserve", "visit", "اپوائنٹ", "بک", "وقت لگوانا")) {
-    setBookFlagExternal();
+    whatsHintSetter?.();
     return ur
       ? "[excited] بہت خوب! اپوائنٹمنٹ کے لیے WhatsApp کریں 0312 3329479 پر، یا ویب سائٹ کا Book بٹن استعمال کریں۔"
       : "[excited] Wonderful! To book, WhatsApp us on 0312 3329479 or use the Book button on this page.";
@@ -184,31 +251,6 @@ function localBrain(question: string): string {
     : "[sorry] That one needs our full assistant online. Please WhatsApp us on 0312 3329479 and the team will reply quickly.";
 }
 
-/** module-level hook so localBrain can surface booking intent */
-let bookFlagSetter: (() => void) | null = null;
-function setBookFlagExternal(): void {
-  bookFlagSetter?.();
-}
-
-async function fetchBlob(text: string, lang: Lang, emotion: Emotion): Promise<Blob> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20000);
-  try {
-    const res = await fetch("/api/voice-agent/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, lang, emotion }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`tts ${res.status}`);
-    const blob = await res.blob();
-    if (blob.size < 500) throw new Error("tiny audio");
-    return blob;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /* component                                                           */
 /* ------------------------------------------------------------------ */
@@ -217,14 +259,15 @@ export default function VoiceAgent() {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<AgentState>("idle");
   const [inputLang, setInputLang] = useState<Lang>("ur");
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [caption, setCaption] = useState("");
+  const [userLines, setUserLines] = useState<string[]>([]);
   const [interim, setInterim] = useState("");
   const [draft, setDraft] = useState("");
   const [micHint, setMicHint] = useState("");
   const [voiceInputOk, setVoiceInputOk] = useState(true);
-  const [bookHint, setBookHint] = useState(false);
-  const [premiumMode, setPremiumMode] = useState<"off" | "voice" | "text">("off");
+  const [premiumLive, setPremiumLive] = useState(false);
+  const [booking, setBooking] = useState<BookingView | null>(null);
+  const [whatsHint, setWhatsHint] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
 
   const historyRef = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const runIdRef = useRef(0);
@@ -238,36 +281,48 @@ export default function VoiceAgent() {
   const logRef = useRef<HTMLDivElement | null>(null);
   const thinkingRef = useRef(false);
   const elConvRef = useRef<ElConversation | null>(null);
-  const elTextOnlyRef = useRef(false);
-  const premiumFailedRef = useRef(false);
+  const elAgentsRef = useRef<string[]>(DEFAULT_AGENTS);
+  const elIdxRef = useRef(0);
+  const elFailedRef = useRef(false);
+  const elRetryRef = useRef(0);
+  const elStartingRef = useRef(false);
   const startSRRef = useRef<(() => void) | null>(null);
   const inputLangRef = useRef<Lang>("ur");
   const voiceInputOkRef = useRef(true);
+  const interimRef = useRef("");
+  const speakingSinceRef = useRef(0);
+  const vadSubmitRef = useRef<{ text: string; at: number } | null>(null);
+  const draftRef = useRef<DraftFields>({});
+  interface LiveQueue {
+    items: QueueItem[];
+    lang: Lang;
+    closed: boolean;
+  }
+  const runLiveQueueRef = useRef<((sp: LiveQueue, runId: number) => Promise<void>) | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
-
   useEffect(() => {
     inputLangRef.current = inputLang;
   }, [inputLang]);
-
   useEffect(() => {
     voiceInputOkRef.current = voiceInputOk;
   }, [voiceInputOk]);
-
   useEffect(() => {
-    bookFlagSetter = () => setBookHint(true);
+    interimRef.current = interim;
+  }, [interim]);
+  useEffect(() => {
+    whatsHintSetter = () => setWhatsHint(true);
     return () => {
-      bookFlagSetter = null;
+      whatsHintSetter = null;
     };
   }, []);
-
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [turns, interim, caption]);
+  }, [userLines, interim]);
 
-  /* ---------- ElevenLabs premium session ---------- */
+  /* ---------- shared teardown ---------- */
 
   const stopVisual = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -280,11 +335,23 @@ export default function VoiceAgent() {
     });
   }, []);
 
+  const stopLegacyAudio = useCallback(() => {
+    runIdRef.current += 1;
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+      } catch {}
+      audioRef.current = null;
+    }
+    try {
+      window.speechSynthesis?.cancel();
+    } catch {}
+  }, []);
+
   const endElSession = useCallback(async () => {
     const conv = elConvRef.current;
     elConvRef.current = null;
-    elTextOnlyRef.current = false;
-    setPremiumMode("off");
+    setPremiumLive(false);
     try {
       recRef.current?.abort();
       recRef.current = null;
@@ -296,7 +363,8 @@ export default function VoiceAgent() {
     }
   }, []);
 
-  /** rAF loop driving the waveform from the ElevenLabs session volumes (premium audio mode) */
+  /* ---------- premium (ElevenLabs ConvAI) session ---------- */
+
   const startElVisual = useCallback(() => {
     const loop = () => {
       const conv = elConvRef.current;
@@ -313,83 +381,201 @@ export default function VoiceAgent() {
     loop();
   }, []);
 
+  /** Force-stop the agent's audio the moment the caller interrupts. */
+  const interruptPremium = useCallback(() => {
+    const conv = elConvRef.current as unknown as
+      | { output?: { interrupt?: (reset?: number) => void } }
+      | null;
+    try {
+      conv?.output?.interrupt?.();
+    } catch {}
+  }, []);
+
   const startElVoice = useCallback(async (): Promise<boolean> => {
-    if (premiumFailedRef.current) return false;
+    if (elFailedRef.current || elStartingRef.current) return false;
+    elStartingRef.current = true;
     try {
       setState("thinking");
       const { Conversation } = await import("@elevenlabs/client");
-      const conv = (await Conversation.startSession({
-        agentId: EL_AGENT_ID,
-        // Full audio session — the agent speaks with its native female Urdu
-        // voice (Reva) and handles mic ASR internally. stripAudioTags keeps
-        // expressive tags like [happy] out of the visible transcript.
+      const agentId = elAgentsRef.current[elIdxRef.current] ?? elAgentsRef.current[0];
+      // mic permission can hang forever (ignored prompts, headless browsers):
+      // race the session against a hard timeout so the panel never freezes
+      let adopted = false;
+      const sessionP = Conversation.startSession({
+        agentId,
         stripAudioTags: true,
+        clientTools: {
+          check_slots: async (params?: { date?: string }) => checkSlotsTool(params),
+          book_appointment: async (params?: Record<string, string>) => {
+            const p = params ?? {};
+            try {
+              const res = await fetch("/api/voice-agent/book", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  name: p.name,
+                  phone: p.phone,
+                  service: p.service,
+                  type: p.type === "followup" ? "followup" : "new",
+                  date: p.date,
+                  timeSlot: p.time,
+                  source: "voice-agent",
+                }),
+              });
+              const j = (await res.json()) as {
+                ok?: boolean;
+                appointment?: { name: string; service: string; type: string; date: string; timeSlot: string };
+                error?: string;
+                reason?: string;
+                free?: string[];
+              };
+              if (j.ok && j.appointment) {
+                setBooking({
+                  kind: "booked",
+                  appt: {
+                    name: j.appointment.name,
+                    service: j.appointment.service,
+                    type: j.appointment.type,
+                    date: j.appointment.date,
+                    time: j.appointment.timeSlot,
+                  },
+                });
+                setWhatsHint(false);
+                return JSON.stringify({
+                  ok: true,
+                  ref: j.appointment.name,
+                  date: j.appointment.date,
+                  time: j.appointment.timeSlot,
+                });
+              }
+              setBooking({ kind: "failed", reason: j.reason ?? j.error });
+              return JSON.stringify({ ok: false, error: j.error ?? "slot unavailable", freeSlots: j.free ?? [] });
+            } catch {
+              setBooking({ kind: "failed", reason: "network" });
+              return JSON.stringify({ ok: false, error: "network error" });
+            }
+          },
+        },
         onMessage: (msg: { source: "user" | "ai"; message?: string }) => {
+          // voice-only UI: the agent's spoken reply is never shown as text
           const text = (msg.message ?? "").trim();
-          if (!text) return;
-          setTurns((t) => {
-            const last = t[t.length - 1];
-            if (last && last.who === (msg.source === "ai" ? "sana" : "you") && last.text === text)
-              return t;
-            return [...t, { who: msg.source === "ai" ? "sana" : "you", text }];
+          if (!text || msg.source !== "user") return;
+          setInterim("");
+          setUserLines((lines) => {
+            if (lines[lines.length - 1] === text) return lines;
+            return [...lines.slice(-7), text];
           });
-          if (msg.source === "ai" && BOOKING_RE.test(text)) setBookHint(true);
         },
         onModeChange: (prop: { mode: "speaking" | "listening" }) => {
           if (!elConvRef.current) return;
-          setState(prop.mode === "speaking" ? "speaking" : "listening");
-          if (prop.mode === "listening") setCaption("");
+          if (prop.mode === "speaking") {
+            speakingSinceRef.current = Date.now();
+            setState("speaking");
+          } else {
+            setState("listening");
+          }
         },
         onStatusChange: (prop: {
           status: "connected" | "disconnected" | "connecting" | "disconnecting";
         }) => {
-          if (prop.status === "disconnected" && elConvRef.current) {
-            void endElSession();
-            setState("idle");
-            stopVisual();
-          }
-        },
-        onError: () => {
-          // quota exhausted / network issue -> mark premium as failed for this page view
-          premiumFailedRef.current = true;
+          if (prop.status !== "disconnected" || !elConvRef.current) return;
           void endElSession();
           stopVisual();
           setState("idle");
-          setMicHint(EL_FAILED_HINT);
+          // one transparent reconnect attempt with the next agent in the fleet
+          if (elRetryRef.current < 2 && elAgentsRef.current.length > 1) {
+            elRetryRef.current += 1;
+            elIdxRef.current = (elIdxRef.current + 1) % elAgentsRef.current.length;
+            setReconnecting(true);
+            setTimeout(() => {
+              setReconnecting(false);
+              void startElVoice();
+            }, 900);
+          }
         },
-      })) as unknown as ElConversation;
+        onError: () => {
+          elRetryRef.current += 1;
+          const canRetry = elRetryRef.current <= elAgentsRef.current.length;
+          void endElSession();
+          stopVisual();
+          setState("idle");
+          if (canRetry && elIdxRef.current < elAgentsRef.current.length - 1) {
+            elIdxRef.current += 1;
+            setReconnecting(true);
+            setTimeout(() => {
+              setReconnecting(false);
+              void startElVoice();
+            }, 900);
+            return;
+          }
+          elFailedRef.current = true;
+          setMicHint(EL_FAILED_HINT);
+          // offline greeting so the panel never feels dead
+          if (voiceInputOkRef.current) {
+            const items: QueueItem[] = splitSentences(GREETING.replace(EMOTION_RE, "")).map(
+              (text) => ({ text, emotion: "warm" as Emotion }),
+            );
+            void runLiveQueueRef.current?.({ items, lang: "ur", closed: false }, ++runIdRef.current);
+          }
+        },
+      }) as unknown as ElConversation;
+
+      const conv = (await Promise.race([
+        Promise.resolve(sessionP),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+      ])) as ElConversation | null;
+
+      if (!conv) {
+        // session still dialling in the background — drop it when it lands
+        void Promise.resolve(sessionP)
+          .then((late: ElConversation) => {
+            if (!adopted) {
+              late?.endSession?.().catch(() => {});
+            }
+          })
+          .catch(() => {});
+        // a hung start means mic trouble in this browser: use legacy mode
+        // for the rest of this page view instead of freezing on every turn
+        elFailedRef.current = true;
+        setMicHint(EL_FAILED_HINT);
+        setState("idle");
+        return false;
+      }
+      adopted = true;
 
       elConvRef.current = conv;
-      elTextOnlyRef.current = false;
-      setPremiumMode("voice");
+      setPremiumLive(true);
       setMicHint("");
       setState("listening");
       startElVisual();
       return true;
     } catch {
+      setState("idle");
       return false;
+    } finally {
+      elStartingRef.current = false;
     }
   }, [endElSession, startElVisual, stopVisual]);
 
-  /* ---------- legacy pipeline (brain route + TTS route) ---------- */
-
-  const stopAll = useCallback(() => {
-    runIdRef.current += 1;
-    if (audioRef.current) {
-      try {
-        audioRef.current.pause();
-      } catch {}
-      audioRef.current = null;
+  /** module-bridge so error handlers can speak the offline greeting */
+  const ensureAgents = useCallback(async () => {
+    if (elAgentsRef.current.length > 1) return;
+    try {
+      const res = await fetch("/api/voice-agent/config");
+      const j = (await res.json()) as { agentIds?: string[] };
+      if (Array.isArray(j.agentIds) && j.agentIds.length > 0) {
+        elAgentsRef.current = j.agentIds;
+      }
+    } catch {
+      /* keep defaults */
     }
-    try {
-      window.speechSynthesis?.cancel();
-    } catch {}
-    // pause mic recognition while Sana speaks (prevents echo/barge-in feedback)
-    try {
-      recRef.current?.abort();
-      recRef.current = null;
-    } catch {}
   }, []);
+
+  useEffect(() => {
+    void ensureAgents();
+  }, [ensureAgents]);
+
+  /* ---------- legacy pipeline: streaming brain + live TTS queue ---------- */
 
   const playBlob = useCallback((blob: Blob, runId: number) => {
     return new Promise<void>((resolve) => {
@@ -409,86 +595,84 @@ export default function VoiceAgent() {
     });
   }, []);
 
-  const speakFallback = useCallback(
-    (text: string, lang: Lang, emotion: Emotion, runId: number) => {
-      return new Promise<void>((resolve) => {
-        if (runId !== runIdRef.current) return resolve();
-        try {
-          const synth = window.speechSynthesis;
-          if (!synth) return resolve();
-          const u = new SpeechSynthesisUtterance(text);
-          u.lang = lang === "ur" ? "ur-PK" : "en-US";
-          u.rate = emotion === "excited" ? 1.12 : emotion === "sorry" ? 0.88 : 1;
-          const voices = synth.getVoices();
-          const voice = voices.find((v) =>
-            v.lang.toLowerCase().startsWith(lang === "ur" ? "ur" : "en"),
-          );
-          if (voice) u.voice = voice;
-          let done = false;
-          const finish = () => {
-            if (!done) {
-              done = true;
-              resolve();
-            }
-          };
-          u.onend = finish;
-          u.onerror = finish;
-          synth.speak(u);
-          setTimeout(finish, Math.max(6000, text.length * 120));
-        } catch {
-          resolve();
-        }
-      });
-    },
-    [],
-  );
-
-  const runQueue = useCallback(
-    async (items: QueueItem[], lang: Lang) => {
-      const runId = ++runIdRef.current;
-      setState("speaking");
-
-      interface Job {
-        item: QueueItem;
-        blobP: Promise<Blob | null> | null;
+  const speakFallback = useCallback((text: string, lang: Lang, emotion: Emotion, runId: number) => {
+    return new Promise<void>((resolve) => {
+      if (runId !== runIdRef.current) return resolve();
+      try {
+        const synth = window.speechSynthesis;
+        if (!synth) return resolve();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = lang === "ur" ? "ur-PK" : "en-US";
+        u.rate = emotion === "excited" ? 1.12 : emotion === "sorry" ? 0.88 : 1;
+        const voices = synth.getVoices();
+        const voice = voices.find((v) =>
+          v.lang.toLowerCase().startsWith(lang === "ur" ? "ur" : "en"),
+        );
+        if (voice) u.voice = voice;
+        let done = false;
+        const finish = () => {
+          if (!done) {
+            done = true;
+            resolve();
+          }
+        };
+        u.onend = finish;
+        u.onerror = finish;
+        synth.speak(u);
+        setTimeout(finish, Math.max(6000, text.length * 120));
+      } catch {
+        resolve();
       }
-      const jobs: Job[] = items.map((item) => ({ item, blobP: null }));
+    });
+  }, []);
+
+  const runLiveQueue = useCallback(
+    async (sp: LiveQueue, runId: number) => {
+      setState("speaking");
+      speakingSinceRef.current = Date.now();
+
+      const pref = new Map<number, Promise<Blob | null>>();
       const startFetch = (idx: number) => {
-        if (idx >= 0 && idx < jobs.length && !jobs[idx].blobP) {
-          jobs[idx].blobP = fetchBlob(jobs[idx].item.text, lang, jobs[idx].item.emotion).catch(
-            () => null,
+        if (idx >= 0 && idx < sp.items.length && !pref.has(idx)) {
+          pref.set(
+            idx,
+            fetchBlob(sp.items[idx].text, sp.lang, sp.items[idx].emotion).catch(() => null),
           );
         }
       };
-      startFetch(0);
-      startFetch(1);
 
-      for (let i = 0; i < jobs.length; i += 1) {
+      let i = 0;
+      for (;;) {
         if (runId !== runIdRef.current) return;
+        while (i >= sp.items.length && !sp.closed) {
+          await new Promise((r) => setTimeout(r, 60));
+          if (runId !== runIdRef.current) return;
+        }
+        if (i >= sp.items.length) break;
+        startFetch(i + 1);
         startFetch(i + 2);
-        setCaption(jobs[i].item.text);
-        const blob = await jobs[i].blobP;
+        const item = sp.items[i];
+        const blob = await (pref.get(i) ?? Promise.resolve(null));
         if (runId !== runIdRef.current) return;
-
         if (blob) {
           await playBlob(blob, runId);
         } else {
-          await speakFallback(jobs[i].item.text, lang, jobs[i].item.emotion, runId);
+          await speakFallback(item.text, sp.lang, item.emotion, runId);
         }
         if (runId !== runIdRef.current) return;
+        i += 1;
       }
 
       if (runId === runIdRef.current) {
         setState(elConvRef.current ? "listening" : "idle");
-        setCaption("");
-        // hands-free (legacy voice mode only): resume the mic after Sana finishes;
-        // never while a premium session is live (the SDK owns the mic then)
-        if (!elConvRef.current && premiumFailedRef.current && voiceInputOkRef.current) {
+        // hands-free (legacy voice mode only): resume the mic after Sana finishes
+        if (!elConvRef.current && voiceInputOkRef.current) {
           setTimeout(() => {
             if (
               runId === runIdRef.current &&
               stateRef.current === "listening" &&
-              !recRef.current
+              !recRef.current &&
+              !elConvRef.current
             ) {
               startSRRef.current?.();
             }
@@ -499,29 +683,12 @@ export default function VoiceAgent() {
     [playBlob, speakFallback],
   );
 
-  const speakReply = useCallback(
-    (reply: string) => {
-      const { items, plain } = parseReply(reply);
-      const lang = detectLang(plain);
-      setTurns((t) => [...t, { who: "sana", text: plain }]);
-      historyRef.current = [
-        ...historyRef.current,
-        { role: "assistant" as const, content: plain },
-      ].slice(-12);
-      if (items.length > 0) {
-        void runQueue(items, lang);
-      } else {
-        setState("idle");
-      }
-    },
-    [runQueue],
-  );
+  runLiveQueueRef.current = runLiveQueue;
 
   const pushUserTurn = useCallback((text: string) => {
-    setTurns((t) => {
-      const last = t[t.length - 1];
-      if (last && last.who === "you" && last.text === text) return t;
-      return [...t, { who: "you" as const, text }];
+    setUserLines((lines) => {
+      if (lines[lines.length - 1] === text) return lines;
+      return [...lines.slice(-7), text];
     });
     const lastH = historyRef.current[historyRef.current.length - 1];
     if (!(lastH && lastH.role === "user" && lastH.content === text)) {
@@ -537,37 +704,150 @@ export default function VoiceAgent() {
       thinkingRef.current = true;
       setState("thinking");
       pushUserTurn(text);
+
+      const sp: LiveQueue = { items: [], lang: inputLangRef.current, closed: false };
+      const runId = ++runIdRef.current;
+      void runLiveQueue(sp, runId);
+
       try {
         const res = await fetch("/api/voice-agent/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: historyRef.current }),
+          body: JSON.stringify({ messages: historyRef.current, draft: draftRef.current }),
         });
-        const data = (await res.json()) as { reply?: string; error?: string; booking?: boolean };
-        if (!res.ok || !data.reply) throw new Error(data.error ?? "brain failed");
-        if (data.booking) setBookHint(true);
-        speakReply(data.reply);
+        if (!res.ok || !res.body) throw new Error("brain failed");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let raw = "";
+        let flushedPtr = 0;
+        let emotion: Emotion | null = null;
+        let pending = "";
+
+        const flushSentence = (sentence: string) => {
+          const t = sentence.trim();
+          if (!t) return;
+          sp.items.push({ text: t.slice(0, 320), emotion: emotion ?? "neutral" });
+        };
+
+        const drainPending = (final: boolean) => {
+          for (;;) {
+            const idx = Array.from(pending).findIndex((ch) => ".!?؟۔\n".includes(ch));
+            if (idx === -1) break;
+            flushSentence(pending.slice(0, idx + 1));
+            pending = pending.slice(idx + 1);
+          }
+          if (final && pending.trim()) {
+            flushSentence(pending);
+            pending = "";
+          } else if (pending.length > 220) {
+            // safety valve: pathological no-punctuation streams still speak
+            flushSentence(pending.slice(0, 320));
+            pending = pending.slice(320);
+          }
+        };
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            const t = line.trim();
+            if (!t.startsWith("data:")) continue;
+            const payload = t.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            let ev: {
+              type?: string;
+              t?: string;
+              reply?: string;
+              draft?: DraftFields;
+              booked?: Record<string, string> | null;
+              bookingError?: string;
+            };
+            try {
+              ev = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+            if (ev.type === "delta" && ev.t) {
+              raw += ev.t;
+              if (!emotion) {
+                const m = raw.match(EMOTION_RE);
+                if (m && EMO_LIST.includes(m[1] as Emotion)) {
+                  emotion = m[1] as Emotion;
+                }
+              }
+              const clean = raw.replace(EMOTION_RE, "");
+              if (clean.length < flushedPtr) {
+                // emotion tag stripped after partial arrival -> restart window
+                flushedPtr = 0;
+                pending = "";
+              }
+              pending += clean.slice(flushedPtr);
+              flushedPtr = clean.length;
+              drainPending(false);
+            } else if (ev.type === "meta") {
+              // keep the brain's context complete even though Sana's text
+              // is never displayed (voice-only UI)
+              const spoken = String(ev.reply ?? "").replace(EMOTION_RE, "").trim();
+              if (spoken) {
+                historyRef.current = [
+                  ...historyRef.current,
+                  { role: "assistant" as const, content: spoken },
+                ].slice(-12);
+              }
+              if (ev.draft) draftRef.current = ev.draft;
+              if (ev.booked) {
+                setBooking({
+                  kind: "booked",
+                  appt: {
+                    name: String(ev.booked.name ?? ""),
+                    service: String(ev.booked.service ?? ""),
+                    type: String(ev.booked.type ?? "new"),
+                    date: String(ev.booked.date ?? ""),
+                    time: String(ev.booked.timeSlot ?? ev.booked.time ?? ""),
+                  },
+                });
+              } else if (ev.bookingError) {
+                setBooking({ kind: "failed", reason: ev.bookingError });
+              } else if (ev.draft && Object.values(ev.draft).some(Boolean)) {
+                setBooking({ kind: "collecting", fields: ev.draft });
+              }
+            }
+          }
+        }
+        drainPending(true);
+        sp.closed = true;
       } catch {
+        sp.closed = true;
+        stopLegacyAudio();
+        const reply = localBrain(text);
+        const plain = reply.replace(EMOTION_RE, "").trim();
         setMicHint("");
-        speakReply(localBrain(text));
+        const items: QueueItem[] = splitSentences(plain).map((s) => ({ text: s, emotion: "warm" }));
+        void runLiveQueueRef.current?.({ items, lang: inputLangRef.current, closed: true }, ++runIdRef.current);
       } finally {
         thinkingRef.current = false;
+        sp.closed = true;
       }
     },
-    [pushUserTurn, speakReply],
+    [pushUserTurn, runLiveQueue, stopLegacyAudio],
   );
 
   const sendMessage = useCallback(
     async (raw: string) => {
       const text = raw.trim();
       if (!text || thinkingRef.current) return;
-      stopAll();
+      stopLegacyAudio();
       setInterim("");
-      setCaption("");
-      setBookHint(false);
+      setWhatsHint(false);
 
-      // 1) premium session already live? just forward the text
+      // 1) premium session live? forward text (interrupt current speech first)
       if (elConvRef.current) {
+        interruptPremium();
         setState("thinking");
         pushUserTurn(text);
         try {
@@ -578,30 +858,30 @@ export default function VoiceAgent() {
         }
       }
 
-      // 2) try starting a premium session (Reva voice; legacy on failure)
-      if (!premiumFailedRef.current) {
+      // 2) premium not tried yet? open session (Reva greets, then reads the text)
+      if (!elFailedRef.current && !elStartingRef.current) {
         setState("thinking");
         const ok = await startElVoice();
         if (ok && elConvRef.current) {
-          // the agent speaks its Urdu greeting; forward the question after it
+          pushUserTurn(text);
           setTimeout(() => {
             try {
               elConvRef.current?.sendUserMessage(text);
             } catch {}
-          }, 2200);
+          }, 2400);
           return;
         }
         await endElSession();
       }
 
-      // 3) legacy pipeline (pushes its own user turn)
-      setMicHint(premiumFailedRef.current ? EL_FAILED_HINT : "");
+      // 3) legacy pipeline (streaming brain + TTS queue)
+      setMicHint(elFailedRef.current ? EL_FAILED_HINT : "");
       void legacySend(text);
     },
-    [endElSession, legacySend, pushUserTurn, startElVoice, stopAll],
+    [endElSession, interruptPremium, legacySend, pushUserTurn, startElVoice, stopLegacyAudio],
   );
 
-  /* ---------- mic (local SpeechRecognition -> premium text-only brain) ---------- */
+  /* ---------- mic (local SpeechRecognition + VAD + barge-in) ---------- */
 
   const startSR = useCallback(() => {
     const Ctor = (
@@ -625,20 +905,24 @@ export default function VoiceAgent() {
     rec.continuous = true;
     rec.maxAlternatives = 1;
     rec.onresult = (e: SRResultEvent) => {
-      let interim = "";
+      let interimText = "";
       for (let i = e.resultIndex; i < e.results.length; i += 1) {
         const r = e.results[i];
         if (r.isFinal) {
           const finalText = r[0].transcript.trim();
-          if (finalText) {
-            void sendMessage(finalText);
-            return;
+          if (!finalText) continue;
+          // VAD already submitted this utterance? swallow the duplicate final.
+          const sub = vadSubmitRef.current;
+          if (sub && Date.now() - sub.at < 3000 && (finalText.includes(sub.text) || sub.text.includes(finalText))) {
+            continue;
           }
-        } else {
-          interim += r[0].transcript;
+          vadSubmitRef.current = null;
+          void sendMessage(finalText);
+          return;
         }
+        interimText += r[0].transcript;
       }
-      setInterim(interim);
+      setInterim(interimText);
     };
     rec.onerror = (e: SRErrorEvent) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
@@ -647,15 +931,15 @@ export default function VoiceAgent() {
         stopVisual();
         setState("idle");
       }
-      // no-speech / audio-capture hiccups: recognition cycles via onend
     };
     rec.onend = () => {
       recRef.current = null;
       setInterim("");
-      if (stateRef.current === "listening" && voiceInputOkRef.current) {
-        // keep the mic alive while the session is open
+      if (stateRef.current === "listening" && voiceInputOkRef.current && !elConvRef.current) {
         setTimeout(() => {
-          if (stateRef.current === "listening" && !recRef.current) startSRRef.current?.();
+          if (stateRef.current === "listening" && !recRef.current && !elConvRef.current) {
+            startSRRef.current?.();
+          }
         }, 350);
       }
     };
@@ -668,19 +952,28 @@ export default function VoiceAgent() {
   }, [sendMessage, stopVisual]);
   startSRRef.current = startSR;
 
-  /* ---------- mic + visualizer (legacy listening path) ---------- */
+  /* ---------- mic visualizer + VAD fast-submit + instant barge-in ---------- */
 
   const startVisual = useCallback(async () => {
     if (ctxRef.current) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
       streamRef.current = stream;
       const ctx = new AudioContext();
       ctxRef.current = ctx;
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.55;
       ctx.createMediaStreamSource(stream).connect(analyser);
       const data = new Uint8Array(analyser.frequencyBinCount);
+
+      let loudFrames = 0;
+      let silenceFrames = 0;
+      let speechSeen = false;
+      let lastFrame = performance.now();
+
       const loop = () => {
         if (!ctxRef.current) return;
         analyser.getByteFrequencyData(data);
@@ -689,6 +982,48 @@ export default function VoiceAgent() {
           const v = data[3 + i * 5] / 255;
           b.style.transform = `scaleY(${(0.22 + v * 1.6).toFixed(2)})`;
         });
+
+        const now = performance.now();
+        const dt = Math.min(80, now - lastFrame);
+        lastFrame = now;
+
+        let sum = 0;
+        for (let i = 2; i < 10; i += 1) sum += data[i];
+        const rms = sum / (8 * 255);
+
+        const st = stateRef.current;
+        if (st === "speaking") {
+          silenceFrames = 0;
+          if (now - speakingSinceRef.current > BARGE_GRACE_MS && rms > BARGE_RMS) {
+            loudFrames += 1;
+            if (loudFrames >= BARGE_FRAMES) {
+              loudFrames = 0;
+              // user started talking over Sana -> cut audio, listen immediately
+              stopLegacyAudio();
+              setState("listening");
+              startSRRef.current?.();
+            }
+          } else {
+            loudFrames = 0;
+          }
+        } else if (st === "listening") {
+          if (rms > SPEAK_RMS) {
+            speechSeen = true;
+            silenceFrames = 0;
+          } else if (speechSeen && interimRef.current.trim().length >= 2) {
+            silenceFrames += dt / 16.7;
+            if (silenceFrames >= SILENCE_FRAMES) {
+              silenceFrames = 0;
+              speechSeen = false;
+              const text = interimRef.current.trim();
+              if (text && !thinkingRef.current) {
+                vadSubmitRef.current = { text, at: Date.now() };
+                setInterim("");
+                void sendMessage(text);
+              }
+            }
+          }
+        }
         rafRef.current = requestAnimationFrame(loop);
       };
       loop();
@@ -697,7 +1032,7 @@ export default function VoiceAgent() {
         if (b) b.classList.add("va-bar-fallback");
       });
     }
-  }, []);
+  }, [sendMessage, stopLegacyAudio]);
 
   const stopListening = useCallback(() => {
     try {
@@ -709,29 +1044,26 @@ export default function VoiceAgent() {
   }, [stopVisual]);
 
   const startListening = useCallback(() => {
-    const Ctor = (
-      window as unknown as {
-        SpeechRecognition?: SRCtor;
-        webkitSpeechRecognition?: SRCtor;
-      }
-    ).SpeechRecognition ||
-    (window as unknown as { webkitSpeechRecognition?: SRCtor }).webkitSpeechRecognition;
-
-    stopAll();
-    setCaption("");
+    stopLegacyAudio();
     setInterim("");
     setMicHint("");
     setState("listening");
 
     void (async () => {
       // premium path: the session owns the mic (ElevenLabs ASR + Reva voice)
-      if (!premiumFailedRef.current) {
+      if (!elFailedRef.current) {
         const ok = await startElVoice();
         if (ok) return;
         await endElSession();
       }
 
-      // premium unavailable (quota/network) -> local speech recognition + legacy pipeline
+      const Ctor = (
+        window as unknown as {
+          SpeechRecognition?: SRCtor;
+          webkitSpeechRecognition?: SRCtor;
+        }
+      ).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: SRCtor }).webkitSpeechRecognition;
       if (!Ctor) {
         setVoiceInputOk(false);
         setMicHint("Is browser mein voice input support nahi — text se poochein.");
@@ -742,47 +1074,61 @@ export default function VoiceAgent() {
       void startVisual();
       startSR();
     })();
-  }, [endElSession, startElVoice, startSR, startVisual, stopAll]);
+  }, [endElSession, startElVoice, startSR, startVisual, stopLegacyAudio]);
 
   const endVoiceSession = useCallback(() => {
-    stopAll();
+    stopLegacyAudio();
     stopVisual();
     void endElSession();
     setState("idle");
-    setCaption("");
-  }, [endElSession, stopAll, stopVisual]);
+    setInterim("");
+  }, [endElSession, stopLegacyAudio, stopVisual]);
 
   /* ---------- greeting + cleanup ---------- */
 
   const openPanel = useCallback(() => {
     setOpen(true);
-  }, []);
+    // pre-connect immediately: Sana greets while the caller settles,
+    // so the first question has zero wait
+    void (async () => {
+      await ensureAgents();
+      if (!elFailedRef.current && !elConvRef.current) {
+        const ok = await startElVoice();
+        if (!ok) {
+          await endElSession();
+        }
+      }
+    })();
+  }, [endElSession, ensureAgents, startElVoice]);
 
   const closePanel = useCallback(() => {
-    stopAll();
+    stopLegacyAudio();
     stopListening();
     void endElSession();
     setOpen(false);
-  }, [endElSession, stopAll, stopListening]);
+  }, [endElSession, stopLegacyAudio, stopListening]);
 
   useEffect(() => {
     return () => {
-      stopAll();
+      stopLegacyAudio();
       stopVisual();
       void endElSession();
     };
-  }, [endElSession, stopAll, stopVisual]);
+  }, [endElSession, stopLegacyAudio, stopVisual]);
 
   /* ---------- render ---------- */
 
-  const statusText =
-    state === "listening"
+  const statusText = reconnecting
+    ? "Dobara connect ho rahi hoon..."
+    : state === "listening"
       ? "Sun rahi hoon — boliye!"
       : state === "thinking"
         ? "Soch rahi hoon..."
         : state === "speaking"
-          ? "Jawab de rahi hoon — rokne ke liye mic dabayen"
-          : "Boliye ya likhiye — jawab awaz mein milega";
+          ? "Bol rahi hoon — beech me bol kar rok saktay hain"
+          : premiumLive
+            ? "Connected — boliye ya likhiye"
+            : "Boliye ya likhiye — jawab awaz mein milega";
 
   const orbStyle = { bottom: "calc(1.15rem + env(safe-area-inset-bottom))", right: "1.15rem" };
 
@@ -815,7 +1161,7 @@ export default function VoiceAgent() {
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold leading-tight text-ink">Sana</span>
           <span className="block truncate text-[11px] leading-tight text-muted-ink">
-            {premiumMode === "voice" ? "TK Dent Voice Assistant · Premium" : "TK Dent Voice Assistant"}
+            {premiumLive ? "TK Dent Voice Assistant · Premium" : "TK Dent Voice Assistant"}
           </span>
         </span>
         <div
@@ -847,7 +1193,7 @@ export default function VoiceAgent() {
         </button>
       </header>
 
-      {/* status zone */}
+      {/* status zone (voice-only: no agent transcript) */}
       <div className="flex flex-col items-center gap-3 px-4 pb-3 pt-5">
         <div className="flex items-center gap-4">
           <span
@@ -888,45 +1234,93 @@ export default function VoiceAgent() {
           {statusText}
         </p>
 
+        {/* only the caller's own words appear here — never Sana's reply */}
         <p
           aria-live="polite"
           aria-atomic="true"
           className="min-h-[2.5rem] w-full rounded-2xl bg-mint/25 px-3 py-2 text-center text-[13px] font-medium leading-snug text-ink"
         >
-          {caption || interim || "…"}
+          {interim || (state === "speaking" ? "· · ·" : userLines[userLines.length - 1] || "…")}
         </p>
       </div>
 
-      {/* transcript */}
-      <div
-        ref={logRef}
-        role="log"
-        aria-label="Baat cheet ka record"
-        className="max-h-32 overflow-y-auto border-y border-teal/15 bg-white/50 px-4 py-2 va-scroll"
-      >
-        {turns.length === 0 && interim === "" ? (
-          <p className="py-2 text-center text-[11px] text-muted-ink">
-            Mic dabayen aur boliye — Sana khud salam karegi, ya sawal likhein.
-          </p>
-        ) : (
-          turns.map((t, i) => (
+      {/* caller's own words (input log only) */}
+      {userLines.length > 0 && (
+        <div
+          ref={logRef}
+          role="log"
+          aria-label="Aap ki baat-cheet"
+          className="max-h-24 overflow-y-auto border-y border-teal/15 bg-white/50 px-4 py-2 va-scroll"
+        >
+          {userLines.map((t, i) => (
             <p key={i} className="py-0.5 text-[12px] leading-snug text-muted-ink">
-              <span className={`font-bold ${t.who === "you" ? "text-ink" : "text-teal"}`}>
-                {t.who === "you" ? "Aap:" : "Sana:"}
-              </span>{" "}
-              {t.text}
+              <span className="font-bold text-ink">Aap:</span> {t}
             </p>
-          ))
-        )}
-        {interim && (
-          <p className="py-0.5 text-[12px] italic leading-snug text-muted-ink/70">
-            <span className="font-bold text-ink">Aap:</span> {interim}…
-          </p>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {/* booking handoff */}
-      {bookHint && (
+      {/* live booking status */}
+      {booking?.kind === "collecting" && (
+        <div className="mx-3 my-2 rounded-2xl border border-teal/20 bg-mint/20 px-3 py-2.5">
+          <p className="flex items-center gap-2 text-[12px] font-bold text-ink">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-teal" aria-hidden="true" />
+            Appointment details collect ho rahi hain...
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+            {(
+              [
+                ["Naam", booking.fields.name],
+                ["Phone", booking.fields.phone],
+                ["Service", booking.fields.service],
+                ["Visit", booking.fields.type === "followup" ? "Follow-up" : booking.fields.type ? "Naya" : ""],
+                ["Din/Waqt", booking.fields.date ? `${booking.fields.date} ${booking.fields.time ?? ""}` : ""],
+              ] as Array<[string, string | undefined]>
+            ).map(([label, val]) => (
+              <span
+                key={label}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                  val ? "bg-teal text-white" : "bg-white/70 text-muted-ink"
+                }`}
+              >
+                <BadgeCheck className="h-3 w-3" aria-hidden="true" />
+                {label}
+                {val ? `: ${val}` : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {booking?.kind === "booked" && (
+        <div className="mx-3 my-2 rounded-2xl border border-teal/30 bg-gradient-to-br from-teal to-[#0B6B63] px-3.5 py-3 text-white shadow-md">
+          <p className="flex items-center gap-2 text-[13px] font-extrabold">
+            <BadgeCheck className="h-4 w-4" aria-hidden="true" />
+            Appointment pakka ho gaya!
+          </p>
+          <p className="mt-1 text-[12px] leading-snug text-white/90">
+            {booking.appt.name} · {booking.appt.service} ·{" "}
+            {booking.appt.type === "followup" ? "Follow-up" : "Naya patient"}
+          </p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-[12px] font-semibold text-white">
+            <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+            {booking.appt.date}
+            <Clock className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
+            {booking.appt.time}
+          </p>
+          <a
+            href={WHATSAPP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-bold text-teal-2 transition-transform hover:scale-[1.02]"
+          >
+            <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+            WhatsApp par bhi confirm karein
+          </a>
+        </div>
+      )}
+
+      {(booking?.kind === "failed" || whatsHint) && (
         <a
           href={WHATSAPP_URL}
           target="_blank"
@@ -943,18 +1337,32 @@ export default function VoiceAgent() {
         <button
           type="button"
           onClick={() => {
-            if (premiumMode === "voice") {
-              endVoiceSession();
+            if (premiumLive) {
+              if (state === "speaking") {
+                interruptPremium();
+                setState("listening");
+              } else {
+                endVoiceSession();
+              }
+            } else if (state === "speaking") {
+              stopLegacyAudio();
+              setState("idle");
             } else {
               startListening();
             }
           }}
           disabled={state === "thinking"}
-          aria-label={premiumMode === "voice" ? "Voice chat band karein" : "Mic se baat karein"}
-          aria-pressed={premiumMode === "voice"}
+          aria-label={
+            premiumLive
+              ? state === "speaking"
+                ? "Sana ko rokein"
+                : "Voice chat band karein"
+              : "Mic se baat karein"
+          }
+          aria-pressed={premiumLive}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal text-white shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {premiumMode === "voice" ? (
+          {state === "speaking" ? (
             <Square className="h-4 w-4 fill-current" aria-hidden="true" />
           ) : (
             <Mic className="h-5 w-5" aria-hidden="true" />
@@ -977,13 +1385,12 @@ export default function VoiceAgent() {
           className="h-11 min-w-0 flex-1 rounded-full border border-teal/30 bg-white px-4 text-sm text-ink placeholder:text-muted-ink/60 focus:border-teal focus:outline-none focus:ring-2 focus:ring-teal/25 disabled:opacity-50"
         />
 
-        {state === "speaking" && premiumMode !== "voice" ? (
+        {state === "speaking" && !premiumLive ? (
           <button
             type="button"
             onClick={() => {
-              stopAll();
+              stopLegacyAudio();
               setState("idle");
-              setCaption("");
             }}
             aria-label="Jawab rok dein"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#07272B] text-white shadow-md transition-all hover:scale-105"
