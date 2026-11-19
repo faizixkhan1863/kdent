@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   AudioLines,
   BadgeCheck,
@@ -1159,310 +1160,473 @@ export default function VoiceAgent() {
 
   /* ---------- render ---------- */
 
+  const isUr = inputLang === "ur";
+  const T = isUr
+    ? {
+        reconnecting: "دوبارہ جڑ رہی ہوں…",
+        listening: "سن رہی ہوں — بولیے!",
+        thinking: "سوچ رہی ہوں…",
+        speaking: "بول رہی ہوں — بیچ میں بول کر روک سکتے ہیں",
+        liveIdle: "جڑی ہوئی — بولیے یا لکھیں",
+        idle: "بولیے یا لکھیں — جواب آواز میں ملے گا",
+        yours: "آپ کی بات",
+        phIdle: "اپنا سوال لکھیں…",
+        phSpeaking: "ثناء بول رہی ہیں…",
+        collecting: "اپوائنٹمنٹ کی تفصیلات جمع ہو رہی ہیں…",
+        booked: "اپوائنٹمنٹ پکّی ہو گئی!",
+        newPatient: "نیا مریض",
+        followUp: "فالو اپ",
+        confirmWa: "واٹس ایپ پر بھی تصدیق کریں",
+        waBook: "واٹس ایپ پر اپوائنٹمنٹ بک کریں",
+        name: "نام",
+        phone: "فون",
+        service: "سروس",
+        visit: "ویزٹ",
+        slot: "دن / وقت",
+      }
+    : {
+        reconnecting: "Reconnecting…",
+        listening: "Listening — go ahead!",
+        thinking: "Thinking…",
+        speaking: "Speaking — just interrupt me anytime",
+        liveIdle: "Connected — speak or type",
+        idle: "Speak or type — answers come by voice",
+        yours: "YOU",
+        phIdle: "Type your question…",
+        phSpeaking: "Sana is speaking…",
+        collecting: "Collecting your appointment details…",
+        booked: "Appointment confirmed!",
+        newPatient: "New patient",
+        followUp: "Follow-up",
+        confirmWa: "Also confirm on WhatsApp",
+        waBook: "Book on WhatsApp",
+        name: "Name",
+        phone: "Phone",
+        service: "Service",
+        visit: "Visit",
+        slot: "Day / Time",
+      };
+
   const statusText = reconnecting
-    ? "Dobara connect ho rahi hoon..."
+    ? T.reconnecting
     : state === "listening"
-      ? "Sun rahi hoon — boliye!"
+      ? T.listening
       : state === "thinking"
-        ? "Soch rahi hoon..."
+        ? T.thinking
         : state === "speaking"
-          ? "Bol rahi hoon — beech me bol kar rok saktay hain"
+          ? T.speaking
           : premiumLive
-            ? "Connected — boliye ya likhiye"
-            : "Boliye ya likhiye — jawab awaz mein milega";
+            ? T.liveIdle
+            : T.idle;
 
   const orbStyle = { bottom: "calc(1.15rem + env(safe-area-inset-bottom))", right: "1.15rem" };
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={openPanel}
-        aria-label="TK Dent voice assistant kholen"
-        className="va-orb fixed z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-teal to-[#07272B] text-white shadow-xl transition-transform duration-300 hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal sm:h-16 sm:w-16"
-        style={orbStyle}
-      >
-        <AudioLines className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
-      </button>
-    );
-  }
-
   return (
-    <section
-      role="dialog"
-      aria-label="TK Dent voice assistant Sana"
-      className="fixed z-[80] w-[min(92vw,380px)] overflow-hidden rounded-3xl border border-teal/25 bg-white/90 shadow-2xl backdrop-blur-xl"
-      style={orbStyle}
-    >
-      {/* header */}
-      <header className="flex items-center gap-3 border-b border-teal/15 bg-gradient-to-r from-teal/10 to-mint/20 px-4 py-3">
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-teal to-[#07272B] text-white">
-          <AudioLines className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold leading-tight text-ink">Sana</span>
-          <span className="block truncate text-[11px] leading-tight text-muted-ink">
-            {premiumLive ? "TK Dent Voice Assistant · Premium" : "TK Dent Voice Assistant"}
-          </span>
-        </span>
-        <div
-          className="flex items-center gap-1 rounded-full border border-teal/25 bg-white/70 p-0.5"
-          role="group"
-          aria-label="Boli jani wali zuban"
-        >
-          {(["ur", "en"] as Lang[]).map((l) => (
-            <button
-              key={l}
-              type="button"
-              onClick={() => setInputLang(l)}
-              aria-pressed={inputLang === l}
-              className={`rounded-full px-2 py-1 text-[11px] font-semibold transition-colors ${
-                inputLang === l ? "bg-teal text-white" : "text-muted-ink hover:text-teal"
-              }`}
-            >
-              {l === "ur" ? "اردو" : "EN"}
-            </button>
-          ))}
-        </div>
-        <button
+    <AnimatePresence mode="wait" initial={false}>
+      {!open ? (
+        <motion.button
+          key="va-orb"
           type="button"
-          onClick={closePanel}
-          aria-label="Assistant band karein"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-muted-ink transition-colors hover:bg-teal/10 hover:text-teal"
+          onClick={openPanel}
+          aria-label="TK Dent voice assistant kholen"
+          initial={{ opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.7 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          className="va-orb fixed z-[80] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-teal-2 via-teal to-ink-2 text-white shadow-[0_18px_44px_-12px_rgba(4,28,32,0.65)] ring-2 ring-mint-glow/30 transition-transform duration-300 hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal sm:h-16 sm:w-16"
+          style={orbStyle}
         >
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
-      </header>
-
-      {/* status zone (voice-only: no agent transcript) */}
-      <div className="flex flex-col items-center gap-3 px-4 pb-3 pt-5">
-        <div className="flex items-center gap-4">
-          <span
-            className={`flex h-12 w-12 items-center justify-center rounded-full text-white transition-all duration-300 ${
-              state === "speaking"
-                ? "bg-gradient-to-br from-teal to-[#0B6B63] shadow-lg shadow-teal/40 scale-105"
-                : state === "listening"
-                  ? "bg-gradient-to-br from-teal to-[#07272B] va-orb"
-                  : "bg-gradient-to-br from-teal to-[#07272B]"
-            }`}
-          >
-            {state === "listening" ? (
-              <Mic className="h-5 w-5" aria-hidden="true" />
-            ) : state === "thinking" ? (
-              <Sparkles className="h-5 w-5 animate-pulse" aria-hidden="true" />
-            ) : (
-              <AudioLines className="h-5 w-5" aria-hidden="true" />
-            )}
-          </span>
-
-          <span className="flex h-9 items-end gap-1.5" aria-hidden="true">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span
-                key={i}
-                ref={(el) => {
-                  barsRef.current[i] = el;
-                }}
-                className={`w-1.5 rounded-full bg-teal transition-[height] ${
-                  state === "listening" || state === "speaking" ? "h-8" : "h-2 opacity-40"
-                }`}
-                style={{ transform: "scaleY(0.3)", transformOrigin: "center bottom" }}
-              />
-            ))}
-          </span>
-        </div>
-
-        <p className="text-xs font-semibold text-muted-ink" aria-hidden="true">
-          {statusText}
-        </p>
-
-        {/* only the caller's own words appear here — never Sana's reply */}
-        <p
-          aria-live="polite"
-          aria-atomic="true"
-          className="min-h-[2.5rem] w-full rounded-2xl bg-mint/25 px-3 py-2 text-center text-[13px] font-medium leading-snug text-ink"
+          <AudioLines className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+        </motion.button>
+      ) : (
+        <motion.section
+          key="va-panel"
+          role="dialog"
+          aria-label="TK Dent voice assistant Sana"
+          className="fixed z-[80] w-[min(94vw,396px)]"
+          style={orbStyle}
+          initial={{ opacity: 0, y: 26, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 22, scale: 0.95 }}
+          transition={{ type: "spring", stiffness: 300, damping: 28 }}
         >
-          {interim || (state === "speaking" ? "· · ·" : userLines[userLines.length - 1] || "…")}
-        </p>
-      </div>
+          <div className="overflow-hidden rounded-[30px] bg-gradient-to-b from-mint-glow/70 via-white/30 to-teal-3/50 p-[1.5px] shadow-[0_44px_96px_-30px_rgba(4,28,32,0.6)]">
+            <div className="overflow-hidden rounded-[28px] bg-porcelain/90 backdrop-blur-2xl">
+              {/* header */}
+              <header className="relative flex items-center gap-3 bg-gradient-to-r from-ink-2 via-ink-3 to-teal-2 px-4 py-3.5 text-white">
+                <div
+                  className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full bg-teal-3/30 blur-2xl"
+                  aria-hidden="true"
+                />
+                <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/25">
+                  <AudioLines className="h-5 w-5 text-mint-glow" aria-hidden="true" />
+                  <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3">
+                    <span
+                      className="absolute inline-flex h-full w-full animate-ping rounded-full bg-mint-glow opacity-60"
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="relative inline-flex h-3 w-3 rounded-full bg-mint-glow ring-2 ring-ink-2"
+                      aria-hidden="true"
+                    />
+                  </span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-[15px] font-extrabold tracking-wide">Sana</span>
+                    {premiumLive && (
+                      <span className="rounded-full bg-mint-glow/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-mint-glow ring-1 ring-mint-glow/40">
+                        Premium Voice
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block font-urdu text-[11.5px] leading-[1.9] text-mint-glow/85">
+                    ٹی کے ڈینٹ وائس اسسٹنٹ
+                  </span>
+                </span>
+                <div
+                  className="flex shrink-0 items-center rounded-full bg-white/10 p-0.5 ring-1 ring-white/20"
+                  role="group"
+                  aria-label="Boli jani wali zuban"
+                >
+                  {(["ur", "en"] as Lang[]).map((l) => (
+                    <button
+                      key={l}
+                      type="button"
+                      onClick={() => setInputLang(l)}
+                      aria-pressed={inputLang === l}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-all ${
+                        inputLang === l
+                          ? "bg-white text-teal-2 shadow"
+                          : "text-white/70 hover:text-white"
+                      }`}
+                    >
+                      {l === "ur" ? "اردو" : "EN"}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={closePanel}
+                  aria-label="Assistant band karein"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/15 hover:text-white"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </header>
 
-      {/* caller's own words (input log only) */}
-      {userLines.length > 0 && (
-        <div
-          ref={logRef}
-          role="log"
-          aria-label="Aap ki baat-cheet"
-          className="max-h-24 overflow-y-auto border-y border-teal/15 bg-white/50 px-4 py-2 va-scroll"
-        >
-          {userLines.map((t, i) => (
-            <p key={i} className="py-0.5 text-[12px] leading-snug text-muted-ink">
-              <span className="font-bold text-ink">Aap:</span> {t}
-            </p>
-          ))}
-        </div>
-      )}
+              {/* voice stage */}
+              <div className="relative flex flex-col items-center gap-3.5 overflow-hidden bg-[radial-gradient(130%_115%_at_50%_-10%,#0b3a3e_0%,#041c20_64%)] px-5 pb-4 pt-6">
+                <div
+                  className="va-glow pointer-events-none absolute left-1/2 top-0 h-36 w-72 rounded-full bg-teal-3/20 blur-3xl"
+                  aria-hidden="true"
+                />
+                <div className="relative flex items-center gap-5">
+                  <span className="relative flex h-16 w-16 shrink-0 items-center justify-center">
+                    {state === "speaking" && (
+                      <>
+                        <span
+                          className="va-ring absolute inset-0 rounded-full ring-2 ring-mint-glow/60"
+                          aria-hidden="true"
+                        />
+                        <span
+                          className="va-ring absolute inset-0 rounded-full ring-2 ring-teal-3/50"
+                          style={{ animationDelay: "1.3s" }}
+                          aria-hidden="true"
+                        />
+                      </>
+                    )}
+                    <span
+                      className={`flex h-16 w-16 items-center justify-center rounded-full text-white transition-all duration-300 ${
+                        state === "speaking"
+                          ? "scale-105 bg-gradient-to-br from-teal-3 via-teal to-teal-2 shadow-[0_0_34px_rgba(20,179,165,0.55)]"
+                          : "bg-gradient-to-br from-teal to-ink-2"
+                      } ${state === "listening" ? "va-orb" : ""}`}
+                    >
+                      {state === "listening" ? (
+                        <Mic className="h-6 w-6" aria-hidden="true" />
+                      ) : state === "thinking" ? (
+                        <Sparkles className="h-6 w-6 animate-pulse" aria-hidden="true" />
+                      ) : (
+                        <AudioLines className="h-6 w-6" aria-hidden="true" />
+                      )}
+                    </span>
+                  </span>
+                  <span className="flex h-12 items-end gap-[5px]" aria-hidden="true">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <span
+                        key={i}
+                        ref={(el) => {
+                          barsRef.current[i] = el;
+                        }}
+                        className={`w-[5px] rounded-full bg-gradient-to-t from-teal-2 via-teal-3 to-mint-glow ${
+                          state === "listening" || state === "speaking"
+                            ? "h-11 shadow-[0_0_14px_rgba(156,230,218,0.45)]"
+                            : "h-2 opacity-30"
+                        }`}
+                        style={{ transform: "scaleY(0.3)", transformOrigin: "center bottom" }}
+                      />
+                    ))}
+                  </span>
+                </div>
 
-      {/* live booking status */}
-      {booking?.kind === "collecting" && (
-        <div className="mx-3 my-2 rounded-2xl border border-teal/20 bg-mint/20 px-3 py-2.5">
-          <p className="flex items-center gap-2 text-[12px] font-bold text-ink">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-teal" aria-hidden="true" />
-            Appointment details collect ho rahi hain...
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
-            {(
-              [
-                ["Naam", booking.fields.name],
-                ["Phone", booking.fields.phone],
-                ["Service", booking.fields.service],
-                ["Visit", booking.fields.type === "followup" ? "Follow-up" : booking.fields.type ? "Naya" : ""],
-                ["Din/Waqt", booking.fields.date ? `${booking.fields.date} ${booking.fields.time ?? ""}` : ""],
-              ] as Array<[string, string | undefined]>
-            ).map(([label, val]) => (
-              <span
-                key={label}
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
-                  val ? "bg-teal text-white" : "bg-white/70 text-muted-ink"
-                }`}
-              >
-                <BadgeCheck className="h-3 w-3" aria-hidden="true" />
-                {label}
-                {val ? `: ${val}` : ""}
-              </span>
-            ))}
+                <p className="text-center font-semibold text-mint-glow" aria-hidden="true">
+                  <span
+                    className={isUr ? "font-urdu text-[15px] leading-[2.1]" : "text-[12px] tracking-wide"}
+                  >
+                    {statusText}
+                  </span>
+                </p>
+
+                {/* only the caller's own words appear here — never Sana's reply */}
+                <div className="w-full">
+                  <p
+                    className="mb-1 text-right text-[9px] font-bold uppercase tracking-[0.22em] text-mint-glow/55"
+                    aria-hidden="true"
+                  >
+                    {T.yours}
+                  </p>
+                  <div
+                    aria-live="polite"
+                    aria-atomic="true"
+                    className={`ml-auto w-fit max-w-full rounded-2xl rounded-br-md px-4 py-2 text-right shadow-lg ring-1 transition-colors ${
+                      interim
+                        ? "bg-white/10 text-mint-glow/95 ring-white/20"
+                        : "bg-gradient-to-br from-teal to-teal-2 text-white ring-white/10"
+                    }`}
+                  >
+                    <span
+                      className={`block ${isUr ? "font-urdu text-[14px] leading-[2]" : "text-[13px] font-medium leading-snug"}`}
+                    >
+                      {interim ||
+                        (state === "speaking" ? "· · ·" : userLines[userLines.length - 1] || "…")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* caller's own words (input log only) */}
+              {userLines.length > 0 && (
+                <div
+                  ref={logRef}
+                  role="log"
+                  aria-label="Aap ki baat-cheet"
+                  className="va-scroll max-h-28 space-y-1.5 overflow-y-auto border-y border-teal/10 bg-white/45 px-4 py-2.5"
+                >
+                  {userLines.map((t, i) => (
+                    <p
+                      key={i}
+                      className={`ml-auto w-fit max-w-[92%] rounded-xl rounded-tr-sm bg-mint/70 px-3 py-1 text-right text-muted-ink ring-1 ring-teal/15 ${
+                        isUr ? "font-urdu text-[12px] leading-[2]" : "text-[12px] leading-snug"
+                      }`}
+                    >
+                      {t}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {/* live booking status */}
+              {booking?.kind === "collecting" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mx-3 my-2 rounded-2xl bg-white/75 px-3.5 py-3 shadow-sm ring-1 ring-teal/20"
+                >
+                  <p className="flex items-center gap-2 text-[12px] font-bold text-ink">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-teal" aria-hidden="true" />
+                    {T.collecting}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                    {(
+                      [
+                        [T.name, booking.fields.name],
+                        [T.phone, booking.fields.phone],
+                        [T.service, booking.fields.service],
+                        [
+                          T.visit,
+                          booking.fields.type === "followup"
+                            ? T.followUp
+                            : booking.fields.type
+                              ? T.newPatient
+                              : "",
+                        ],
+                        [
+                          T.slot,
+                          booking.fields.date
+                            ? `${booking.fields.date} ${booking.fields.time ?? ""}`
+                            : "",
+                        ],
+                      ] as Array<[string, string | undefined]>
+                    ).map(([label, val]) => (
+                      <span
+                        key={label}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                          val
+                            ? "bg-gradient-to-r from-teal to-teal-2 text-white shadow-sm"
+                            : "border border-dashed border-teal/35 bg-white/70 text-muted-ink"
+                        }`}
+                      >
+                        <BadgeCheck className="h-3 w-3" aria-hidden="true" />
+                        {label}
+                        {val ? `: ${val}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {booking?.kind === "booked" && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 22 }}
+                  className="relative mx-3 my-2 overflow-hidden rounded-2xl bg-gradient-to-br from-ink-2 via-teal-2 to-teal px-4 py-3.5 text-white shadow-[0_22px_50px_-18px_rgba(11,110,102,0.75)] ring-1 ring-mint-glow/30"
+                >
+                  <div
+                    className="pointer-events-none absolute -right-10 -top-14 h-32 w-32 rounded-full bg-mint-glow/25 blur-2xl"
+                    aria-hidden="true"
+                  />
+                  <p className="flex items-center gap-2 text-[13px] font-extrabold">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-mint-glow/20 ring-1 ring-mint-glow/50">
+                      <BadgeCheck className="h-3.5 w-3.5 text-mint-glow" aria-hidden="true" />
+                    </span>
+                    {T.booked}
+                  </p>
+                  <p
+                    className={`mt-1.5 text-[12px] leading-snug text-white/90 ${isUr ? "font-urdu leading-[2]" : ""}`}
+                  >
+                    {booking.appt.name} · {booking.appt.service} ·{" "}
+                    {booking.appt.type === "followup" ? T.followUp : T.newPatient}
+                  </p>
+                  <p className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold text-white">
+                    <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+                    {booking.appt.date}
+                    <Clock className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                    {booking.appt.time}
+                  </p>
+                  <a
+                    href={WHATSAPP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2.5 flex items-center justify-center gap-1.5 rounded-full bg-white/95 px-3 py-2 text-[11px] font-bold text-teal-2 shadow-sm transition-transform hover:scale-[1.02]"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                    {T.confirmWa}
+                  </a>
+                </motion.div>
+              )}
+
+              {(booking?.kind === "failed" || whatsHint) && (
+                <a
+                  href={WHATSAPP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mx-3 mb-2 flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-teal to-teal-2 px-4 py-2.5 text-[12px] font-bold text-white shadow-md ring-1 ring-mint-glow/30 transition-transform hover:scale-[1.02]"
+                >
+                  <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                  {T.waBook}
+                </a>
+              )}
+
+              {/* controls */}
+              <div className="flex items-center gap-2 px-3.5 pb-3 pt-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (premiumLive) {
+                      if (state === "speaking") {
+                        interruptPremium();
+                        setState("listening");
+                      } else {
+                        endVoiceSession();
+                      }
+                    } else if (state === "speaking") {
+                      stopLegacyAudio();
+                      setState("idle");
+                    } else {
+                      startListening();
+                    }
+                  }}
+                  disabled={state === "thinking"}
+                  aria-label={
+                    premiumLive
+                      ? state === "speaking"
+                        ? "Sana ko rokein"
+                        : "Voice chat band karein"
+                      : "Mic se baat karein"
+                  }
+                  aria-pressed={premiumLive}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal to-teal-2 text-white shadow-[0_12px_30px_-10px_rgba(14,143,132,0.8)] ring-2 ring-mint-glow/25 transition-all hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {state === "speaking" ? (
+                    <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+                  ) : (
+                    <Mic className="h-5 w-5" aria-hidden="true" />
+                  )}
+                </button>
+
+                <div className="flex h-12 min-w-0 flex-1 items-center rounded-full bg-white px-4 shadow-inner ring-1 ring-teal/20 transition focus-within:ring-2 focus-within:ring-teal-3/50">
+                  <input
+                    type="text"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && draft.trim()) {
+                        void sendMessage(draft);
+                        setDraft("");
+                      }
+                    }}
+                    placeholder={state === "speaking" ? T.phSpeaking : T.phIdle}
+                    aria-label="Apna sawal likhein"
+                    disabled={state === "thinking"}
+                    className={`h-full w-full bg-transparent text-sm text-ink placeholder:text-muted-ink/60 focus:outline-none disabled:opacity-50 ${
+                      isUr ? "font-urdu leading-[2]" : ""
+                    }`}
+                  />
+                </div>
+
+                {state === "speaking" && !premiumLive ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopLegacyAudio();
+                      setState("idle");
+                    }}
+                    aria-label="Jawab rok dein"
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-ink-2 text-white shadow-md transition-all hover:scale-105 active:scale-95"
+                  >
+                    <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (draft.trim()) {
+                        void sendMessage(draft);
+                        setDraft("");
+                      }
+                    }}
+                    disabled={!draft.trim() || state === "thinking"}
+                    aria-label="Sawal bhejein"
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal to-teal-2 text-white shadow-md ring-2 ring-mint-glow/25 transition-all hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Send className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+
+              {(micHint || !voiceInputOk) && (
+                <p className="px-4 pb-2 text-center text-[11px] leading-snug text-teal-2">{micHint}</p>
+              )}
+
+              <p className="border-t border-teal/10 bg-white/40 py-2 text-center text-[9.5px] font-semibold tracking-[0.28em] text-muted-ink/70">
+                TK DENT VOICE AI · BY SYNKREW
+              </p>
+            </div>
           </div>
-        </div>
+        </motion.section>
       )}
-
-      {booking?.kind === "booked" && (
-        <div className="mx-3 my-2 rounded-2xl border border-teal/30 bg-gradient-to-br from-teal to-[#0B6B63] px-3.5 py-3 text-white shadow-md">
-          <p className="flex items-center gap-2 text-[13px] font-extrabold">
-            <BadgeCheck className="h-4 w-4" aria-hidden="true" />
-            Appointment pakka ho gaya!
-          </p>
-          <p className="mt-1 text-[12px] leading-snug text-white/90">
-            {booking.appt.name} · {booking.appt.service} ·{" "}
-            {booking.appt.type === "followup" ? "Follow-up" : "Naya patient"}
-          </p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-[12px] font-semibold text-white">
-            <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-            {booking.appt.date}
-            <Clock className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
-            {booking.appt.time}
-          </p>
-          <a
-            href={WHATSAPP_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-bold text-teal-2 transition-transform hover:scale-[1.02]"
-          >
-            <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
-            WhatsApp par bhi confirm karein
-          </a>
-        </div>
-      )}
-
-      {(booking?.kind === "failed" || whatsHint) && (
-        <a
-          href={WHATSAPP_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mx-3 mb-2 flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-teal to-[#0B6B63] px-4 py-2.5 text-[12px] font-bold text-white shadow-md transition-transform hover:scale-[1.02]"
-        >
-          <MessageCircle className="h-4 w-4" aria-hidden="true" />
-          WhatsApp par appointment book karein
-        </a>
-      )}
-
-      {/* controls */}
-      <div className="flex items-center gap-2 px-3 py-3">
-        <button
-          type="button"
-          onClick={() => {
-            if (premiumLive) {
-              if (state === "speaking") {
-                interruptPremium();
-                setState("listening");
-              } else {
-                endVoiceSession();
-              }
-            } else if (state === "speaking") {
-              stopLegacyAudio();
-              setState("idle");
-            } else {
-              startListening();
-            }
-          }}
-          disabled={state === "thinking"}
-          aria-label={
-            premiumLive
-              ? state === "speaking"
-                ? "Sana ko rokein"
-                : "Voice chat band karein"
-              : "Mic se baat karein"
-          }
-          aria-pressed={premiumLive}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal text-white shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {state === "speaking" ? (
-            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
-          ) : (
-            <Mic className="h-5 w-5" aria-hidden="true" />
-          )}
-        </button>
-
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && draft.trim()) {
-              void sendMessage(draft);
-              setDraft("");
-            }
-          }}
-          placeholder={state === "speaking" ? "Sana bol rahi hai..." : "Apna sawal likhein..."}
-          aria-label="Apna sawal likhein"
-          disabled={state === "thinking"}
-          className="h-11 min-w-0 flex-1 rounded-full border border-teal/30 bg-white px-4 text-sm text-ink placeholder:text-muted-ink/60 focus:border-teal focus:outline-none focus:ring-2 focus:ring-teal/25 disabled:opacity-50"
-        />
-
-        {state === "speaking" && !premiumLive ? (
-          <button
-            type="button"
-            onClick={() => {
-              stopLegacyAudio();
-              setState("idle");
-            }}
-            aria-label="Jawab rok dein"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#07272B] text-white shadow-md transition-all hover:scale-105"
-          >
-            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              if (draft.trim()) {
-                void sendMessage(draft);
-                setDraft("");
-              }
-            }}
-            disabled={!draft.trim() || state === "thinking"}
-            aria-label="Sawal bhejein"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal text-white shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Send className="h-5 w-5" aria-hidden="true" />
-          </button>
-        )}
-      </div>
-
-      {(micHint || !voiceInputOk) && (
-        <p className="px-4 pb-2 text-center text-[11px] leading-snug text-teal">{micHint}</p>
-      )}
-
-      <p className="border-t border-teal/10 bg-white/40 py-1.5 text-center text-[10px] tracking-wide text-muted-ink/70">
-        TK DENT VOICE AI · BY SYNKREW
-      </p>
-    </section>
+    </AnimatePresence>
   );
 }

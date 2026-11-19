@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Manrope } from "next/font/google";
+import { Fraunces, Manrope, Noto_Nastaliq_Urdu } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -14,6 +14,15 @@ const body = Manrope({
   variable: "--font-body",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
+// Nastaliq gives every Urdu word in the voice panel its true calligraphic
+// premium look (Sana transcript, status lines, booking chips).
+const nastaliq = Noto_Nastaliq_Urdu({
+  variable: "--font-nastaliq",
+  subsets: ["arabic"],
+  weight: ["400", "600"],
   display: "swap",
 });
 
@@ -78,7 +87,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${display.variable} ${body.variable} antialiased bg-background text-foreground`}
+        className={`${display.variable} ${body.variable} ${nastaliq.variable} antialiased bg-background text-foreground`}
       >
         {children}
         <Toaster />
