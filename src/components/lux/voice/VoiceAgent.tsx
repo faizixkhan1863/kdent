@@ -1124,16 +1124,17 @@ export default function VoiceAgent() {
 
   const openPanel = useCallback(() => {
     setOpen(true);
-    // pre-connect immediately: Sana greets while the caller settles,
-    // so the first question has zero wait
     void (async () => {
-      await ensureAgents();
+      // failover list refreshes in the background — never block the call on it
+      // (session starts instantly with the default primary agent)
+      const cfgP = ensureAgents();
       if (!elFailedRef.current && !elConvRef.current) {
         const ok = await startElVoice();
         if (!ok) {
           await endElSession();
         }
       }
+      await cfgP;
     })();
   }, [endElSession, ensureAgents, startElVoice]);
 
