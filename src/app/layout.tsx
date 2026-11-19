@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "TK Dent Dental & Aesthetic Care — Bani Gala, Islamabad",
   description:
-    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Tanveer Khokhar (PMDC 717175-03-D). Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0312 3329479.",
+    "Bani Gala's boutique dental & aesthetic studio. Smile design, painless RCTs, clear aligners, implants & maxillofacial care by Dr. Tanveer Khokhar. Rated 5.0★. Mon–Sat 10 AM–7 PM. Reserve on WhatsApp: 0312 3329479.",
   keywords: [
     "TK Dent",
     "dentist Bani Gala",

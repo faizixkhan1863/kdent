@@ -110,7 +110,7 @@ export default function Footer() {
               Synkrew
             </a>
           </span>
-          <span>Dr. Tanveer Khokhar · PMDC 717175-03-D</span>
+          <span>Dr. Tanveer Khokhar · PMDC Registered</span>
         </div>
         <div className="mt-4">
           <a

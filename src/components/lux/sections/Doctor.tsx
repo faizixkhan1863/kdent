@@ -74,7 +74,7 @@ export default function Doctor() {
             </dl>
 
             <p className="mt-6 inline-flex items-center gap-2 rounded-full border border-teal/25 bg-mint/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-2">
-              PMDC Registered · 717175-03-D
+              PMDC Registered
             </p>
 
             <div className="mt-9 flex flex-wrap gap-4">
